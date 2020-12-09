@@ -60,6 +60,7 @@ class Char_map:
 		assert word_length % 2 == 0, "word_length must be even"
 		self.word_length = word_length
 		self.chars = ''.join(sorted(list(set(list(''.join(seq))))))  # sorted string of characters appearing in seq
+		self.chars += "#"  # stop char - used to indicate end of sequence
 		self.binary_vals = initialize_binary_matrix(len(self.chars), word_length)
 	
 	def char2bin(self, char):
@@ -93,76 +94,102 @@ class Sdm:
 	def store(self, address, data):
 		# store binary word data at top nact addresses matching address
 		top_matches = find_matches(self.addresses, address, self.nact, index_only = True)
-		# print("sdm store, top_matches=%s" % top_matches)
 		d = data.copy()
 		d[d==0] = -1  # replace zeros in data with -1
-		# print("sdm store, adding in d=%s" % d)
 		for i in top_matches:
 			self.data_array[i] += d
 
 	def read(self, address):
 		top_matches = find_matches(self.addresses, address, self.nact, index_only = True)
 		i = top_matches[0]
-		# print("sdm read, top_matches=%s" % top_matches)
 		sum = self.data_array[i].copy()
 		for i in top_matches[1:]:
-			# print("sdm read, data_array[%s]=%s" % (i, self.data_array[i]))
-			# print("sdm read, sum=%s" % sum)
 			sum += self.data_array[i]
 		sum[sum<1] = 0   # replace values less than 1 with zero
 		sum[sum>0] = 1   # replace values greater than 0 with 1
-		# print("sdm read, sum after threshold=%s" % sum)
 		return sum
+
+def recall(prefix, sdm, cmap):
+	# recall sequence starting with prefix
+	# build address to start searching
+	threshold = sdm.word_length / 4
+	b0 = cmap.char2bin(prefix[0])  # binary word associated with first character
+	address = merge(b0, b0)
+	for char in prefix[1:]:
+		b = cmap.char2bin(char)
+		address = merge(b, address)
+	found = [ prefix, ]
+	word2 = prefix
+	# now read sequence using prefix address
+	while True:
+		b = sdm.read(address)
+		top_matches = cmap.bin2char(b)
+		found.append(top_matches)
+		found_char = top_matches[0][0]
+		if found_char == "#":
+			# found stop char
+			break
+		# perform "cleanup" by getting b corresponding to top match 
+		if top_matches[0][1] > 0:
+			# was not an exact match.  Check to see if hamming distance larger than threshold
+			if top_matches[0][1] > threshold:
+				break
+			# Cleanup by getting b corresponding to top match
+			b = cmap.char2bin(found_char)
+		address = merge(b, address)
+		word2 += found_char
+	return [found, word2]
 
 def main():
 	word_length = 256
 	num_rows = 512
-	seq = ["happy_day", "evans_hall", "campanile", "sutardja_dai_hall", "oppenheimer", "distributed memory"]
+	seq = ["happy day", "evans hall", "campanile", "sutardja dai hall", "oppenheimer", "distributed memory",
+		"abcdefghijklmnopqrstuvwxyz"]
 	seq = Sequences(seq)
 	cmap = Char_map(seq.seq, word_length=word_length)
-	# print("cmap chars='%s'" % cmap.chars)
-	# print("cmap binary_vals=\n%s" % cmap.binary_vals)
-	# return
 	sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=num_rows)
 	# store all sequences
-	# import pdb; pdb.set_trace()
 	for word in seq.seq:
 		print("storing '%s'" % word)
 		b0 = cmap.char2bin(word[0])  # binary word associated with first character
 		address = merge(b0, b0)
-		for char in word[1:]:
+		for char in word[1:]+"#":  # add stop character at end
 			b = cmap.char2bin(char)
 			sdm.store(address, b)   # store code for char using address prev_bin
-			# print("Store, address=%s,\ndata=%s" % (address, b))
 			address = merge(b, address)
 
-	# import pdb; pdb.set_trace()
 	# retrieve sequences, starting with first character
 	error_count = 0
 	for word in seq.seq:
-		print ("Recalling '%s'" % word)
-		found = [ word[0], ]
-		word2 = word[0]
-		b0 = cmap.char2bin(word[0])  # binary word associated with first character
-		address = merge(b0, b0)
-		for char in word[1:]:
-			b = sdm.read(address)
-			top_matches = cmap.bin2char(b)
-			found.append(top_matches)
-			found_char = top_matches[0][0]
-			word2 += found_char
-			# perform "cleanup" by getting b corresponding to top match 
-			if top_matches[0][1] > 0:
-				# was not an exact match.  Cleanup by getting b corresponding to top match
-				b = cmap.char2bin(top_matches[0][0])
-			address = merge(b, address)
+		print ("\nRecall '%s'" % word)
+		found, word2 = recall(word[0], sdm, cmap)
 		if word != word2:
 			error_count += 1
 			msg = "ERROR"
 		else:
-		    msg = "Match" 
-		print("%s found:" % msg)
+		    msg = "Match"
 		pp.pprint(found)
-		print("%s words, %s errors" % (len(seq.seq), error_count))
+		print ("Recall '%s'" % word)
+		print("found: '%s' - %s" % (word2, msg))
+	print("%s words, %s errors" % (len(seq.seq), error_count))
 
 main()
+
+
+
+		# found = [ word[0], ]
+		# word2 = word[0]
+		# b0 = cmap.char2bin(word[0])  # binary word associated with first character
+		# address = merge(b0, b0)
+		# for char in word[1:]:
+		# 	b = sdm.read(address)
+		# 	top_matches = cmap.bin2char(b)
+		# 	found.append(top_matches)
+		# 	found_char = top_matches[0][0]
+		# 	word2 += found_char
+		# 	# perform "cleanup" by getting b corresponding to top match 
+		# 	if top_matches[0][1] > 0:
+		# 		# was not an exact match.  Cleanup by getting b corresponding to top match
+		# 		b = cmap.char2bin(top_matches[0][0])
+		# 	address = merge(b, address)
+
