@@ -3,6 +3,120 @@ import numpy as np
 from operator import itemgetter
 import pprint
 pp = pprint.PrettyPrinter(indent=4)
+import argparse
+import shlex
+import readline
+readline.parse_and_bind('tab: complete')
+
+
+
+class Env:
+	# stores environment settings and data arrays
+
+	def __init__(self):
+		self.parse_command_arguments()
+
+	def parse_command_arguments(self):
+		parser = argparse.ArgumentParser(description='Store sequences using a sparse distributed memory.',
+			formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+		# also make parser for interactive updating parameters (does not include defaults)
+		iparse = argparse.ArgumentParser(description='Update sdm parameters.') # exit_on_error=False)
+		parser.add_argument("-w", "--word_length", help="Word length for address and memory", type=int, default=256)
+		iparse.add_argument("-w", "--word_length", help="Word length for address and memory", type=int)
+		parser.add_argument("-r", "--num_rows", help="Number rows in memory", type=int, default=512)
+		iparse.add_argument("-r", "--num_rows", help="Number rows in memory", type=int)
+		parser.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int, default=5)
+		iparse.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int)
+		parser.add_argument("-cmt", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
+			" matching character to item memory", type=float, default=0.25)
+		iparse.add_argument("-cmf", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
+			" matching character to item memory", type=float)
+		parser.add_argument('strings_to_store', metavar='string', nargs='*', help='Strings to store', default=
+			'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer" "distributed memory"'
+		    ' "abcdefghijklmnopqrstuvwxyz"')
+		iparse.add_argument('-s', "--strings_to_store", nargs='*', help='Strings to store')
+		self.iparse = iparse # save for later parsing interactive input
+		args = parser.parse_args()
+		self.pkeys = ["word_length", "num_rows", "activation_count", "char_match_fraction", "strings_to_store"]
+		self.parms = {}
+		for key in self.pkeys:
+			self.parms[key] = getattr(args, key)
+		# self.word_length = args.word_length
+		# self.num_rows = args.num_rows
+		# self.activation_count = args.activation_count
+		# self.char_match_fraction = args.char_match_fraction
+		# self.strings_to_store = args.strings_to_store
+		self.display_settings()
+
+	def display_settings(self):
+		print("Current settings:")
+		for key in self.pkeys:
+			print(" %s: %s" % (key, self.parms[key]))
+		# print("word_length = %s" % self.word_length)
+		# print("num_rows = %s" % self.num_rows)
+		# print("activation_count = %s" % self.activation_count)
+		# print("char_match_fraction = %s" % self.char_match_fraction)
+		# print("strings_to_store = %s" % self.strings_to_store)
+
+	def update_settings(self, line):
+		instructions = ("Update current settings using flags:\n"
+			" -w --world_length; -r --num_rows; -a --activation_count; -cmf --char_match_fraction; -s --strings_to_store"
+			)
+		if len(line) < 4:
+			self.display_settings()
+			print(instructions)
+			return
+		try:
+			args = self.iparse.parse_args(shlex.split(line))
+		except argparse.ArgumentError:
+			print('Invalid entry, try again.')
+			return
+		updated = []
+		for key in self.pkeys:
+			val = getattr(args, key)
+			if val is not None:
+				self.parms[key] = val
+				updated.append("%s=%s" % (key, val))
+		if updated:
+			print("Updated: %s" % ", ".join(updated))
+			self.display_settings()
+		else:
+			print("Nothing updated")
+
+
+def do_interactive_commands(env):
+	instructions = ("Enter command, control-d to quit\n"
+		" s <string> - store new string\n"
+		" r <prefix> - recall starting with prefix\n"
+		" r - recall stored strings\n"
+		" u - update parameters\n"
+		" i - initalize memory")
+	print(instructions)
+	while True:
+		try:
+			line=input("> ")
+		except EOFError:
+			break;
+		if len(line) == 0 or line[0] not in "srui":
+			print(instructions)
+			continue
+		cmd = line[0]
+		arg = "" if len(line) == 1 else line[1:].strip()
+		if cmd == "r" and len(arg) > 0:
+			print("recall prefix %s" % arg)
+		elif cmd == "r":
+			print("recall stored strings")
+		elif cmd == "s":
+			print("store new string %s" % arg)
+		elif cmd == "u":
+			print("update parameter settings %s" % arg)
+			env.update_settings(arg)
+		elif cmd == "i":
+			print("initialize memory")
+		else:
+			sys.exit("Invalid command: %s" % cmd)
+	print("\nDone")
+
 
 class Sequences:
 	# sequences learned
@@ -31,6 +145,12 @@ def find_matches(m, b, nret, index_only = False):
 		ndiff = np.count_nonzero(m[i]!=b)
 		matches.append( (i, ndiff) )
 	matches.sort(key=itemgetter(1))
+	hamming = matches[nret-1][1]
+	nh = 1
+	while matches[nret-1+nh][1] == hamming:
+		nh += 1
+	if nh > 1:
+		print("Found %s  match last hamming: %s" % (nh, matches[nret-1:nret-1+nh]))
 	top_matches = matches[0:nret]
 	if index_only:
 		top_matches = [x[0] for x in top_matches]
@@ -140,7 +260,26 @@ def recall(prefix, sdm, cmap):
 		word2 += found_char
 	return [found, word2]
 
+def recall_seq(seq, sdm, cmap):
+	# recall stored sequences
+	error_count = 0
+	for word in seq.seq:
+		print ("\nRecall '%s'" % word)
+		found, word2 = recall(word[0], sdm, cmap)
+		if word != word2:
+			error_count += 1
+			msg = "ERROR"
+		else:
+		    msg = "Match"
+		pp.pprint(found)
+		print ("Recall '%s'" % word)
+		print("found: '%s' - %s" % (word2, msg))
+	print("%s words, %s errors" % (len(seq.seq), error_count))
+
+
+
 def main():
+	env = Env()	
 	word_length = 256
 	num_rows = 512
 	seq = ["happy day", "evans hall", "campanile", "sutardja dai hall", "oppenheimer", "distributed memory",
@@ -159,19 +298,8 @@ def main():
 			address = merge(b, address)
 
 	# retrieve sequences, starting with first character
-	error_count = 0
-	for word in seq.seq:
-		print ("\nRecall '%s'" % word)
-		found, word2 = recall(word[0], sdm, cmap)
-		if word != word2:
-			error_count += 1
-			msg = "ERROR"
-		else:
-		    msg = "Match"
-		pp.pprint(found)
-		print ("Recall '%s'" % word)
-		print("found: '%s' - %s" % (word2, msg))
-	print("%s words, %s errors" % (len(seq.seq), error_count))
+	recall_seq(seq, sdm, cmap)
+	do_interactive_commands(env)
 
 main()
 
