@@ -13,6 +13,20 @@ readline.parse_and_bind('tab: complete')
 class Env:
 	# stores environment settings and data arrays
 
+	# command line arguments, also used for parsing interactive update of parameters
+	parms = [
+		{ "name":"word_length", "kw":{"help":"Word length for address and memory", "type":int},
+	 	  "flag":"w", "require_initialize":True, "default":256 },
+	 	{ "name":"num_rows", "kw":{"help":"Number rows in memory","type":int},
+	 	  "flag":"r", "require_initialize":True, "default":512 },
+	 	{ "name":"activation_count", "kw":{"help":"Number memory rows to activate for each address","type":int},
+	 	  "flag":"a", "require_initialize":True, "default":5 },
+	 	{ "name":"char_match_fraction", "kw": {"help":"Fraction of word_length to form hamming distance threshold for"
+			" matching character to item memory","type":float},"flag":"cmf", "require_initialize":False, "default":0.25},
+		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "require_initialize":False,
+		  "flag":"s", "default":'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
+		  ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'}]
+
 	def __init__(self):
 		self.parse_command_arguments()
 
@@ -21,26 +35,34 @@ class Env:
 			formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 		# also make parser for interactive updating parameters (does not include defaults)
 		iparse = argparse.ArgumentParser(description='Update sdm parameters.') # exit_on_error=False)
-		parser.add_argument("-w", "--word_length", help="Word length for address and memory", type=int, default=256)
-		iparse.add_argument("-w", "--word_length", help="Word length for address and memory", type=int)
-		parser.add_argument("-r", "--num_rows", help="Number rows in memory", type=int, default=512)
-		iparse.add_argument("-r", "--num_rows", help="Number rows in memory", type=int)
-		parser.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int, default=5)
-		iparse.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int)
-		parser.add_argument("-cmt", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
-			" matching character to item memory", type=float, default=0.25)
-		iparse.add_argument("-cmf", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
-			" matching character to item memory", type=float)
-		parser.add_argument('strings_to_store', metavar='string', nargs='*', help='Strings to store', default=
-			'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer" "distributed memory"'
-		    ' "abcdefghijklmnopqrstuvwxyz"')
-		iparse.add_argument('-s', "--strings_to_store", nargs='*', help='Strings to store')
+		for p in self.parms:
+			parser.add_argument("-"+p["flag"], "--"+p["name"], **p["kw"], default=p["default"])
+			iparse.add_argument("-"+p["flag"], "--"+p["name"], **p["kw"])  # default not used for interactive update
+
+		# parser.add_argument("-w", "--word_length", help="Word length for address and memory", type=int, default=256)
+		# iparse.add_argument("-w", "--word_length", help="Word length for address and memory", type=int)
+		# parser.add_argument("-r", "--num_rows", help="Number rows in memory", type=int, default=512)
+		# iparse.add_argument("-r", "--num_rows", help="Number rows in memory", type=int)
+		# parser.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int, default=5)
+		# iparse.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int)
+		# parser.add_argument("-cmt", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
+		# 	" matching character to item memory", type=float, default=0.25)
+		# iparse.add_argument("-cmf", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
+		# 	" matching character to item memory", type=float)
+		# parser.add_argument('strings_to_store', metavar='string', nargs='*', help='Strings to store', default=
+		# 	'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer" "distributed memory"'
+		#     ' "abcdefghijklmnopqrstuvwxyz"')
+		# parser.add_argument("-s", "--string_to_store", nargs='*', type=str, help='String to store', default=
+		# 	'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer" "distributed memory"'
+		#     ' "abcdefghijklmnopqrstuvwxyz"')
+		# iparse.add_argument('-s', "--string_to_store", nargs='*', help='String to store')
 		self.iparse = iparse # save for later parsing interactive input
 		args = parser.parse_args()
-		self.pkeys = ["word_length", "num_rows", "activation_count", "char_match_fraction", "strings_to_store"]
-		self.parms = {}
-		for key in self.pkeys:
-			self.parms[key] = getattr(args, key)
+		# self.pkeys = [x["name"] for x in cargs]
+		# self.pkeys = ["word_length", "num_rows", "activation_count", "char_match_fraction", "strings_to_store"]
+		self.pvals = {p["name"]: getattr(args, p["name"]) for p in self.parms}
+		# for key in self.pkeys:
+		# 	self.parms[key] = getattr(args, key)
 		# self.word_length = args.word_length
 		# self.num_rows = args.num_rows
 		# self.activation_count = args.activation_count
@@ -50,8 +72,8 @@ class Env:
 
 	def display_settings(self):
 		print("Current settings:")
-		for key in self.pkeys:
-			print(" %s: %s" % (key, self.parms[key]))
+		for p in self.parms:
+			print(" %s: %s" % (p["name"], self.pvals[p["name"]]))
 		# print("word_length = %s" % self.word_length)
 		# print("num_rows = %s" % self.num_rows)
 		# print("activation_count = %s" % self.activation_count)
@@ -59,10 +81,10 @@ class Env:
 		# print("strings_to_store = %s" % self.strings_to_store)
 
 	def update_settings(self, line):
-		instructions = ("Update current settings using flags:\n"
-			" -w --world_length; -r --num_rows; -a --activation_count; -cmf --char_match_fraction; -s --strings_to_store"
-			)
-		if len(line) < 4:
+		instructions = ("Update settings using 'u' followed by KEY VALUE pair(s), where keys are:\n" +
+			'; '.join(["-"+p["flag"] + " --"+p["name"] for p in self.parms]))
+		#	" -w --world_length; -r --num_rows; -a --activation_count; -cmf --char_match_fraction; -s --string_to_store"
+		if len(line) < 5:
 			self.display_settings()
 			print(instructions)
 			return
@@ -72,14 +94,22 @@ class Env:
 			print('Invalid entry, try again.')
 			return
 		updated = []
-		for key in self.pkeys:
-			val = getattr(args, key)
+		self.initialize = False
+		for p in self.parms:
+			name = p["name"]
+			val = getattr(args, name)
 			if val is not None:
-				self.parms[key] = val
-				updated.append("%s=%s" % (key, val))
+				if self.pvals[name] == val:
+					print("%s unchanged (is already %s)" % (name, val))
+				else:
+					self.pvals[name] = val
+					updated.append("%s=%s" % (name, val))
+					if p["require_initialize"]:
+						self.initialize = True
 		if updated:
 			print("Updated: %s" % ", ".join(updated))
 			self.display_settings()
+			print("initialize=%s" % self.initialize)
 		else:
 			print("Nothing updated")
 
