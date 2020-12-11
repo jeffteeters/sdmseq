@@ -20,7 +20,7 @@ class Env:
 	 	{ "name":"num_rows", "kw":{"help":"Number rows in memory","type":int},
 	 	  "flag":"r", "require_initialize":True, "default":512 },
 	 	{ "name":"activation_count", "kw":{"help":"Number memory rows to activate for each address","type":int},
-	 	  "flag":"a", "require_initialize":True, "default":5 },
+	 	  "flag":"a", "require_initialize":True, "default":5},
 	 	{ "name":"char_match_fraction", "kw": {"help":"Fraction of word_length to form hamming distance threshold for"
 			" matching character to item memory","type":float},"flag":"cmf", "require_initialize":False, "default":0.25},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "require_initialize":False,
@@ -29,6 +29,7 @@ class Env:
 
 	def __init__(self):
 		self.parse_command_arguments()
+		self.initialize()
 
 	def parse_command_arguments(self):
 		parser = argparse.ArgumentParser(description='Store sequences using a sparse distributed memory.',
@@ -38,47 +39,22 @@ class Env:
 		for p in self.parms:
 			parser.add_argument("-"+p["flag"], "--"+p["name"], **p["kw"], default=p["default"])
 			iparse.add_argument("-"+p["flag"], "--"+p["name"], **p["kw"])  # default not used for interactive update
-
-		# parser.add_argument("-w", "--word_length", help="Word length for address and memory", type=int, default=256)
-		# iparse.add_argument("-w", "--word_length", help="Word length for address and memory", type=int)
-		# parser.add_argument("-r", "--num_rows", help="Number rows in memory", type=int, default=512)
-		# iparse.add_argument("-r", "--num_rows", help="Number rows in memory", type=int)
-		# parser.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int, default=5)
-		# iparse.add_argument("-a", "--activation_count", help="Number memory rows to activate for each address", type=int)
-		# parser.add_argument("-cmt", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
-		# 	" matching character to item memory", type=float, default=0.25)
-		# iparse.add_argument("-cmf", "--char_match_fraction", help="Fraction of word_length to form hamming distance threshold for"
-		# 	" matching character to item memory", type=float)
-		# parser.add_argument('strings_to_store', metavar='string', nargs='*', help='Strings to store', default=
-		# 	'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer" "distributed memory"'
-		#     ' "abcdefghijklmnopqrstuvwxyz"')
-		# parser.add_argument("-s", "--string_to_store", nargs='*', type=str, help='String to store', default=
-		# 	'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer" "distributed memory"'
-		#     ' "abcdefghijklmnopqrstuvwxyz"')
-		# iparse.add_argument('-s', "--string_to_store", nargs='*', help='String to store')
 		self.iparse = iparse # save for later parsing interactive input
 		args = parser.parse_args()
-		# self.pkeys = [x["name"] for x in cargs]
-		# self.pkeys = ["word_length", "num_rows", "activation_count", "char_match_fraction", "strings_to_store"]
 		self.pvals = {p["name"]: getattr(args, p["name"]) for p in self.parms}
-		# for key in self.pkeys:
-		# 	self.parms[key] = getattr(args, key)
-		# self.word_length = args.word_length
-		# self.num_rows = args.num_rows
-		# self.activation_count = args.activation_count
-		# self.char_match_fraction = args.char_match_fraction
-		# self.strings_to_store = args.strings_to_store
+		self.pvals["string_to_store"] = shlex.split(self.pvals["string_to_store"])
 		self.display_settings()
+
+	def initialize(self):
+		# initialize sdm and char_map
+		word_length = self.pvals["word_length"]
+		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length)
+		self.sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=self.pvals["num_rows"])
 
 	def display_settings(self):
 		print("Current settings:")
 		for p in self.parms:
 			print(" %s: %s" % (p["name"], self.pvals[p["name"]]))
-		# print("word_length = %s" % self.word_length)
-		# print("num_rows = %s" % self.num_rows)
-		# print("activation_count = %s" % self.activation_count)
-		# print("char_match_fraction = %s" % self.char_match_fraction)
-		# print("strings_to_store = %s" % self.strings_to_store)
 
 	def update_settings(self, line):
 		instructions = ("Update settings using 'u' followed by KEY VALUE pair(s), where keys are:\n" +
@@ -116,7 +92,7 @@ class Env:
 
 def do_interactive_commands(env):
 	instructions = ("Enter command, control-d to quit\n"
-		" s <string> - store new string\n"
+		" s <string> - store new string(s)\n"
 		" r <prefix> - recall starting with prefix\n"
 		" r - recall stored strings\n"
 		" u - update parameters\n"
@@ -134,24 +110,28 @@ def do_interactive_commands(env):
 		arg = "" if len(line) == 1 else line[1:].strip()
 		if cmd == "r" and len(arg) > 0:
 			print("recall prefix %s" % arg)
+			recall_strings(env, shlex.split(arg))
 		elif cmd == "r":
 			print("recall stored strings")
+			recall_param_strings(env)
 		elif cmd == "s":
 			print("store new string %s" % arg)
+			store_strings(env, strings)
 		elif cmd == "u":
 			print("update parameter settings %s" % arg)
 			env.update_settings(arg)
 		elif cmd == "i":
-			print("initialize memory")
+			env.initialize()
+			print("initialized memory.")
 		else:
 			sys.exit("Invalid command: %s" % cmd)
 	print("\nDone")
 
 
-class Sequences:
-	# sequences learned
-	def __init__(self, seq = ["happy_day", "evans_hall", "campanile", "sutardja_dai_hall", "oppenheimer"]):
-		self.seq = seq
+# class Sequences:
+# 	# sequences learned
+# 	def __init__(self, seq = ["happy_day", "evans_hall", "campanile", "sutardja_dai_hall", "oppenheimer"]):
+# 		self.seq = seq
 
 
 # def random_b(word_length):
@@ -204,6 +184,9 @@ def merge(b1, b2):
 
 class Char_map:
 	# maps each character in a sequence to a random binary word
+	# below specifies maximum number of unique characters
+	max_unique_chars = 50
+
 	def __init__(self, seq, word_length = 128):
 		# seq - a Sequence object
 		# word_length - number of bits in random binary word
@@ -211,12 +194,23 @@ class Char_map:
 		self.word_length = word_length
 		self.chars = ''.join(sorted(list(set(list(''.join(seq))))))  # sorted string of characters appearing in seq
 		self.chars += "#"  # stop char - used to indicate end of sequence
-		self.binary_vals = initialize_binary_matrix(len(self.chars), word_length)
+		self.check_length()
+		self.binary_vals = initialize_binary_matrix(self.max_unique_chars, word_length)
 	
+	def check_length(self):
+		# make sure not too many unique characters 
+		if len(self.chars) > self.max_unique_chars:
+			sys.exit("Too many unique characters (%s) max is %s.  Increase constant: max_unique_chars" % (
+				len(self.chars), self.max_unique_chars))
+
 	def char2bin(self, char):
 		# return binary word associated with char
 		index = self.chars.find(char)
-		assert index != -1, "character '%s' not in char_map (%s)" % (char, self.chars)
+		if index == -1:
+			# this is a new character, add it to chars string
+			index = len(self.chars)
+			self.chars += char
+			check_length()
 		return self.binary_vals[index]
 
 	def bin2char(self, b, nret = 3):
@@ -224,7 +218,7 @@ class Char_map:
 		# b is a binary array, same length as word_length
 		# nret is the number of matches to return
 		assert self.word_length == len(b)
-		top_matches = find_matches(self.binary_vals, b, nret)
+		top_matches = find_matches(self.binary_vals[0:len(self.chars),:], b, nret)
 		top_matches = [ (self.chars[x[0]], x[1]) for x in top_matches ]
 		return top_matches
 
@@ -259,21 +253,21 @@ class Sdm:
 		sum[sum>0] = 1   # replace values greater than 0 with 1
 		return sum
 
-def recall(prefix, sdm, cmap):
+def recall(prefix, env):
 	# recall sequence starting with prefix
 	# build address to start searching
-	threshold = sdm.word_length / 4
-	b0 = cmap.char2bin(prefix[0])  # binary word associated with first character
+	threshold = env.pvals["word_length"] * env.pvals["char_match_fraction"]
+	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
 	address = merge(b0, b0)
 	for char in prefix[1:]:
-		b = cmap.char2bin(char)
+		b = env.cmap.char2bin(char)
 		address = merge(b, address)
 	found = [ prefix, ]
 	word2 = prefix
 	# now read sequence using prefix address
 	while True:
-		b = sdm.read(address)
-		top_matches = cmap.bin2char(b)
+		b = env.sdm.read(address)
+		top_matches = env.cmap.bin2char(b)
 		found.append(top_matches)
 		found_char = top_matches[0][0]
 		if found_char == "#":
@@ -285,17 +279,31 @@ def recall(prefix, sdm, cmap):
 			if top_matches[0][1] > threshold:
 				break
 			# Cleanup by getting b corresponding to top match
-			b = cmap.char2bin(found_char)
+			b = env.cmap.char2bin(found_char)
 		address = merge(b, address)
 		word2 += found_char
 	return [found, word2]
 
-def recall_seq(seq, sdm, cmap):
-	# recall stored sequences
+def store_strings(env, strings):
+	for string in strings:
+		print("storing '%s'" % string)
+		b0 = env.cmap.char2bin(string[0])  # binary word associated with first character
+		address = merge(b0, b0)
+		for char in string[1:]+"#":  # add stop character at end
+			b = env.cmap.char2bin(char)
+			env.sdm.store(address, b)   # store code for char using address prev_bin
+			address = merge(b, address)
+
+def store_param_strings(env):
+	# store strings provided as parameters in command line (or updated)
+	store_strings(env, env.pvals["string_to_store"])
+
+def recall_strings(env, strings):
+	# recall list of strings starting with first character of each
 	error_count = 0
-	for word in seq.seq:
+	for word in strings:
 		print ("\nRecall '%s'" % word)
-		found, word2 = recall(word[0], sdm, cmap)
+		found, word2 = recall(word[0], env)
 		if word != word2:
 			error_count += 1
 			msg = "ERROR"
@@ -304,50 +312,18 @@ def recall_seq(seq, sdm, cmap):
 		pp.pprint(found)
 		print ("Recall '%s'" % word)
 		print("found: '%s' - %s" % (word2, msg))
-	print("%s words, %s errors" % (len(seq.seq), error_count))
+	print("%s words, %s errors" % (len(strings), error_count))
 
+def recall_param_strings(env):
+	# recall stored sequences starting with first character
+	recall_strings(env, env.pvals["string_to_store"])
 
 
 def main():
-	env = Env()	
-	word_length = 256
-	num_rows = 512
-	seq = ["happy day", "evans hall", "campanile", "sutardja dai hall", "oppenheimer", "distributed memory",
-		"abcdefghijklmnopqrstuvwxyz"]
-	seq = Sequences(seq)
-	cmap = Char_map(seq.seq, word_length=word_length)
-	sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=num_rows)
-	# store all sequences
-	for word in seq.seq:
-		print("storing '%s'" % word)
-		b0 = cmap.char2bin(word[0])  # binary word associated with first character
-		address = merge(b0, b0)
-		for char in word[1:]+"#":  # add stop character at end
-			b = cmap.char2bin(char)
-			sdm.store(address, b)   # store code for char using address prev_bin
-			address = merge(b, address)
-
+	env = Env()
+	store_param_strings(env)
 	# retrieve sequences, starting with first character
-	recall_seq(seq, sdm, cmap)
+	recall_param_strings(env)
 	do_interactive_commands(env)
 
 main()
-
-
-
-		# found = [ word[0], ]
-		# word2 = word[0]
-		# b0 = cmap.char2bin(word[0])  # binary word associated with first character
-		# address = merge(b0, b0)
-		# for char in word[1:]:
-		# 	b = sdm.read(address)
-		# 	top_matches = cmap.bin2char(b)
-		# 	found.append(top_matches)
-		# 	found_char = top_matches[0][0]
-		# 	word2 += found_char
-		# 	# perform "cleanup" by getting b corresponding to top match 
-		# 	if top_matches[0][1] > 0:
-		# 		# was not an exact match.  Cleanup by getting b corresponding to top match
-		# 		b = cmap.char2bin(top_matches[0][0])
-		# 	address = merge(b, address)
-
