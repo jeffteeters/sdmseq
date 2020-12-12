@@ -23,6 +23,8 @@ class Env:
 	 	  "flag":"a", "require_initialize":True, "default":5},
 	 	{ "name":"char_match_fraction", "kw": {"help":"Fraction of word_length to form hamming distance threshold for"
 			" matching character to item memory","type":float},"flag":"cmf", "require_initialize":False, "default":0.25},
+		{ "name":"permute", "kw":{"help":"Permute values when storing","type":int, "choices":[0, 1]},
+	 	  "flag":"p", "require_initialize":True, "default":0},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "require_initialize":False,
 		  "flag":"s", "default":'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
 		  ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'}]
@@ -30,6 +32,7 @@ class Env:
 	def __init__(self):
 		self.parse_command_arguments()
 		self.initialize()
+		self.display_settings()
 
 	def parse_command_arguments(self):
 		parser = argparse.ArgumentParser(description='Store sequences using a sparse distributed memory.',
@@ -43,24 +46,37 @@ class Env:
 		args = parser.parse_args()
 		self.pvals = {p["name"]: getattr(args, p["name"]) for p in self.parms}
 		self.pvals["string_to_store"] = shlex.split(self.pvals["string_to_store"])
-		self.display_settings()
 
 	def initialize(self):
 		# initialize sdm and char_map
 		word_length = self.pvals["word_length"]
+		# if not require_initialize:
+		# 	self.cmap.re
+		print("Initializing memory.")
 		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length)
 		self.sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=self.pvals["num_rows"])
+		self.saved_strings = []
+		self.initialized = True
+
+	def record_saved_string(self, string):
+		self.saved_strings.append(string)
+
+	def ensure_initialized(self):
+		# make sure initialized after parameter changes
+		if not self.initialized:
+			self.initialize()
 
 	def display_settings(self):
 		print("Current settings:")
 		for p in self.parms:
 			print(" %s: %s" % (p["name"], self.pvals[p["name"]]))
+		print("Saved strings=%s" % self.saved_strings)
 
 	def update_settings(self, line):
 		instructions = ("Update settings using 'u' followed by KEY VALUE pair(s), where keys are:\n" +
 			'; '.join(["-"+p["flag"] + " --"+p["name"] for p in self.parms]))
 		#	" -w --world_length; -r --num_rows; -a --activation_count; -cmf --char_match_fraction; -s --string_to_store"
-		if len(line) < 5:
+		if len(line) < 4:
 			self.display_settings()
 			print(instructions)
 			return
@@ -70,7 +86,6 @@ class Env:
 			print('Invalid entry, try again.')
 			return
 		updated = []
-		self.initialize = False
 		for p in self.parms:
 			name = p["name"]
 			val = getattr(args, name)
@@ -81,20 +96,20 @@ class Env:
 					self.pvals[name] = val
 					updated.append("%s=%s" % (name, val))
 					if p["require_initialize"]:
-						self.initialize = True
+						self.initialized = False
 		if updated:
 			print("Updated: %s" % ", ".join(updated))
 			self.display_settings()
-			print("initialize=%s" % self.initialize)
+			print("initialized=%s" % self.initialized)
 		else:
 			print("Nothing updated")
 
 
 def do_interactive_commands(env):
 	instructions = ("Enter command, control-d to quit\n"
-		" s <string> - store new string(s)\n"
+		" s <string> - store new string(s) OR param strings (if none specified)\n"
 		" r <prefix> - recall starting with prefix\n"
-		" r - recall stored strings\n"
+		" r - recall param strings\n"
 		" u - update parameters\n"
 		" i - initalize memory")
 	print(instructions)
@@ -108,21 +123,27 @@ def do_interactive_commands(env):
 			continue
 		cmd = line[0]
 		arg = "" if len(line) == 1 else line[1:].strip()
+		if cmd == "u":
+			print("update parameter settings %s" % arg)
+			env.update_settings(arg)
+			continue
+		if cmd == "i":
+			env.initialize()
+			continue
+		# remaining commands requre reinitializing if memory size changed
+		env.ensure_initialized()
 		if cmd == "r" and len(arg) > 0:
 			print("recall prefix %s" % arg)
-			recall_strings(env, shlex.split(arg))
+			recall_strings(env, shlex.split(arg), prefix_mode=True)
 		elif cmd == "r":
 			print("recall stored strings")
 			recall_param_strings(env)
-		elif cmd == "s":
+		elif cmd == "s" and len(arg) > 0:
 			print("store new string %s" % arg)
-			store_strings(env, strings)
-		elif cmd == "u":
-			print("update parameter settings %s" % arg)
-			env.update_settings(arg)
-		elif cmd == "i":
-			env.initialize()
-			print("initialized memory.")
+			store_strings(env, shlex.split(arg))
+		elif cmd == "s":
+			print("store '-s' strings")
+			store_param_strings(env)
 		else:
 			sys.exit("Invalid command: %s" % cmd)
 	print("\nDone")
@@ -155,12 +176,12 @@ def find_matches(m, b, nret, index_only = False):
 		ndiff = np.count_nonzero(m[i]!=b)
 		matches.append( (i, ndiff) )
 	matches.sort(key=itemgetter(1))
-	hamming = matches[nret-1][1]
-	nh = 1
-	while matches[nret-1+nh][1] == hamming:
-		nh += 1
-	if nh > 1:
-		print("Found %s  match last hamming: %s" % (nh, matches[nret-1:nret-1+nh]))
+	# hamming = matches[nret-1][1]
+	# nh = 1
+	# while matches[nret-1+nh][1] == hamming:
+	# 	nh += 1
+	# if nh > 1:
+	# 	print("Found %s  match last hamming: %s" % (nh, matches[nret-1:nret-1+nh]))
 	top_matches = matches[0:nret]
 	if index_only:
 		top_matches = [x[0] for x in top_matches]
@@ -177,9 +198,11 @@ def initialize_binary_matrix(nrows, ncols):
 	# 	np.random.shuffle(bm[i])
 	return bm
 
-def merge(b1, b2):
+def merge(b1, b2, permute=False):
 	# merge binary values b1, b2 by taking every other value of each and concationating
 	b3 = np.concatenate((b1[0::2],b2[0::2]))
+	if permute:
+		b3 = np.roll(b3, 1)
 	return b3
 
 class Char_map:
@@ -210,7 +233,7 @@ class Char_map:
 			# this is a new character, add it to chars string
 			index = len(self.chars)
 			self.chars += char
-			check_length()
+			self.check_length()
 		return self.binary_vals[index]
 
 	def bin2char(self, b, nret = 3):
@@ -258,13 +281,14 @@ def recall(prefix, env):
 	# build address to start searching
 	threshold = env.pvals["word_length"] * env.pvals["char_match_fraction"]
 	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
-	address = merge(b0, b0)
+	address = merge(b0, b0, env.pvals["permute"])
 	for char in prefix[1:]:
 		b = env.cmap.char2bin(char)
-		address = merge(b, address)
+		address = merge(b, address, env.pvals["permute"])
 	found = [ prefix, ]
 	word2 = prefix
 	# now read sequence using prefix address
+	ccount = 0
 	while True:
 		b = env.sdm.read(address)
 		top_matches = env.cmap.bin2char(b)
@@ -280,30 +304,36 @@ def recall(prefix, env):
 				break
 			# Cleanup by getting b corresponding to top match
 			b = env.cmap.char2bin(found_char)
-		address = merge(b, address)
+		address = merge(b, address, env.pvals["permute"])
 		word2 += found_char
+		ccount += 1
+		if ccount > 50:
+			break
 	return [found, word2]
 
 def store_strings(env, strings):
 	for string in strings:
 		print("storing '%s'" % string)
 		b0 = env.cmap.char2bin(string[0])  # binary word associated with first character
-		address = merge(b0, b0)
+		address = merge(b0, b0, env.pvals["permute"])
 		for char in string[1:]+"#":  # add stop character at end
 			b = env.cmap.char2bin(char)
 			env.sdm.store(address, b)   # store code for char using address prev_bin
-			address = merge(b, address)
+			address = merge(b, address, env.pvals["permute"])
+		env.record_saved_string(string)
 
 def store_param_strings(env):
 	# store strings provided as parameters in command line (or updated)
 	store_strings(env, env.pvals["string_to_store"])
 
-def recall_strings(env, strings):
+def recall_strings(env, strings, prefix_mode = False):
 	# recall list of strings starting with first character of each
+	# if prefix_mode is True, use entire string as prefix for recall
 	error_count = 0
 	for word in strings:
 		print ("\nRecall '%s'" % word)
-		found, word2 = recall(word[0], env)
+		prefix = word if prefix_mode else word[0]
+		found, word2 = recall(prefix, env)
 		if word != word2:
 			error_count += 1
 			msg = "ERROR"
@@ -311,8 +341,12 @@ def recall_strings(env, strings):
 		    msg = "Match"
 		pp.pprint(found)
 		print ("Recall '%s'" % word)
-		print("found: '%s' - %s" % (word2, msg))
-	print("%s words, %s errors" % (len(strings), error_count))
+		if not prefix_mode:
+			print("found: '%s' - %s" % (word2, msg))
+		else:
+			print("found: '%s'" % word2)
+	if not prefix_mode:
+		print("%s words, %s errors" % (len(strings), error_count))
 
 def recall_param_strings(env):
 	# recall stored sequences starting with first character
