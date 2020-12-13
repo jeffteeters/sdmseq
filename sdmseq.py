@@ -25,9 +25,14 @@ class Env:
 			" matching character to item memory","type":float},"flag":"cmf", "require_initialize":False, "default":0.25},
 		{ "name":"permute", "kw":{"help":"Permute values when storing","type":int, "choices":[0, 1]},
 	 	  "flag":"p", "require_initialize":True, "default":0},
+	 	{ "name":"history_fraction", "kw":{"help":"Fraction of history to store when forming new address","type":float},
+	 	  "flag":"hf", "require_initialize":True, "default":0.5},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "require_initialize":False,
-		  "flag":"s", "default":'"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
-		  ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'}]
+		  "flag":"s", "default":
+		  # '"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
+		  # ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'
+		  '"Evans rrrrr math" "Corey rrrrr eecs"'
+		  }]
 
 	def __init__(self):
 		self.parse_command_arguments()
@@ -198,11 +203,16 @@ def initialize_binary_matrix(nrows, ncols):
 	# 	np.random.shuffle(bm[i])
 	return bm
 
-def merge(b1, b2, permute=False):
-	# merge binary values b1, b2 by taking every other value of each and concationating
-	b3 = np.concatenate((b1[0::2],b2[0::2]))
+def merge(b, b_hist, history_fraction=0.5, permute=False):
+	# hf - history fraction
+	# merge binary values b, b_hist by taking (1 - hf) bits from b, and hf bits from b_hist then concationate
+	 
 	if permute:
-		b3 = np.roll(b3, 1)
+			b3 = np.roll(np.concatenate((b1[0::2],np.roll(b2[0::2], 1))), 1)
+	else:
+		b3 = np.concatenate((b1[0::2],b2[0::2]))
+	# if permute:
+	# 	b3 = np.roll(b3, 1)
 	return b3
 
 class Char_map:
@@ -304,7 +314,17 @@ def recall(prefix, env):
 				break
 			# Cleanup by getting b corresponding to top match
 			b = env.cmap.char2bin(found_char)
-		address = merge(b, address, env.pvals["permute"])
+		new_address = merge(b, address, env.pvals["permute"])
+		diff = np.count_nonzero(address!=new_address)
+		found[-1].append("addr_diff=%s" % diff)
+		if diff == 0:
+			binary_string = "".join(["%s" % i for i in address])
+			binary_string2 = "".join(["%s" % i for i in new_address])
+			hexcode = hex(int(binary_string, 2))
+			found[-1].append("found fixed point, address=%s\n%s\nnew address=%s" % (
+				hexcode, binary_string, binary_string2))
+			break
+		address = new_address
 		word2 += found_char
 		ccount += 1
 		if ccount > 50:
