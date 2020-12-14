@@ -34,9 +34,9 @@ class Env:
 	 	  "flag":"xf", "require_initialize":True, "default":0.5},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "require_initialize":False,
 		  "flag":"s", "default":
-		  # '"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
-		  # ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'
-		  '"Evans rrrrr math" "Corey rrrrr eecs"'
+		  '"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
+		  ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'
+		  ' "Evans rrrrr math" "Corey rrrrr eecs"'
 		  }]
 
 	def __init__(self):
@@ -261,19 +261,19 @@ class Merge():
 	def merge_wx(self, item, history):
 		# form address as two components.  First (1-xf*N) bits are weighted history. Remaining bits (xf*N)are permuted XOR.
 		if(self.pvals["wx"]["wh_len"] > 0):
-			# select bits specified by hist_bits and first
+			# select bits specified by hist_bits and first parte of item
 			hist_part = np.concatenate((history[self.pvals["wx"]["hist_bits"]], item[0:self.pvals["wx"]["item_len"]]))
-		if self.pvals["wx"]["xr_len"] == 0:
-			# no xor component
-			assert len(hist_part) == self.env.pvals["word_length"], ("wx algorithm, no xor part, but len(hist_part) %s"
-				" does not match word_length (%s)" % (len(hist_part), self.env.pvals["word_length"]))
-			return hist_part
+			if self.pvals["wx"]["xr_len"] == 0:
+				# no xor component
+				assert len(hist_part) == self.env.pvals["word_length"], ("wx algorithm, no xor part, but len(hist_part) %s"
+					" does not match word_length (%s)" % (len(hist_part), self.env.pvals["word_length"]))
+				return hist_part
 		# compute XOR part.  Is permute ( xor component from history) XOR second bits from item.
 		hist_input = history[self.pvals["wx"]["wh_len"]:]
 		item_input = item[self.pvals["wx"]["wh_len"]:]
 		assert len(hist_input) == len(item_input)
 		xor_part = np.logical_xor(np.roll(hist_input, 1), item_input)
-		address = np.concatenate((hist_part, xor_part))
+		address = np.concatenate((hist_part, xor_part)) if self.pvals["wx"]["wh_len"] > 0 else xor_part
 		assert len(address) == self.env.pvals["word_length"], "wx algorithm, len(address) (%s) != word_length (%s)" % (
 			len(address), self.env.pvals["word_length"])
 		return address
@@ -283,7 +283,7 @@ class Merge():
 		# the present vector, and the last bN bits should be copied
 		# from the LAST bN bits of the permuted history vector.
 		hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
-		hist_len = int(hf * wh_len)
+		hist_len = int(hf * self.env.pvals["word_length"])
 		assert hist_len > 0, "fl algorithm: must have hist_len(%s) > 0, hf (%s) is too small" % (hist_len, hf)
 		item_len = self.env.pvals["word_length"] - hist_len
 		assert item_len > 0, "fl algorithm: item_len must be > 0, is %s" % item_len
