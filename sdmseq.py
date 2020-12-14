@@ -23,10 +23,15 @@ class Env:
 	 	  "flag":"a", "require_initialize":True, "default":5},
 	 	{ "name":"char_match_fraction", "kw": {"help":"Fraction of word_length to form hamming distance threshold for"
 			" matching character to item memory","type":float},"flag":"cmf", "require_initialize":False, "default":0.25},
-		{ "name":"permute", "kw":{"help":"Permute values when storing","type":int, "choices":[0, 1]},
-	 	  "flag":"p", "require_initialize":True, "default":0},
-	 	{ "name":"history_fraction", "kw":{"help":"Fraction of history to store when forming new address","type":float},
-	 	  "flag":"hf", "require_initialize":True, "default":0.5},
+		{ "name":"merge_algorithm", "kw":{"help":"Algorithm used combine item and history when forming new address. "
+		    "wx - Weighted and/or XOR, fl - First/last bits", "choices":["wx","fl"]},
+	 	  "flag":"ma", "require_initialize":True, "default":"wx"},
+		# { "name":"permute", "kw":{"help":"Permute values when storing","type":int, "choices":[0, 1]},
+		# 	  "flag":"p", "require_initialize":True, "default":0},
+	 	{ "name":"history_fraction", "kw":{"help":"Fraction of history to store when forming new address."
+	 	    "(Both wx and fl algorighms)", "type":float}, "flag":"hf", "require_initialize":True, "default":0.5},
+	 	{ "name":"xor_fraction", "kw":{"help":"Fraction of bits used for xor component in wx algorithm","type":float},
+	 	  "flag":"xf", "require_initialize":True, "default":0.5},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "require_initialize":False,
 		  "flag":"s", "default":
 		  # '"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
@@ -60,6 +65,7 @@ class Env:
 		print("Initializing memory.")
 		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length)
 		self.sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=self.pvals["num_rows"])
+		self.merge = Merge(self)
 		self.saved_strings = []
 		self.initialized = True
 
@@ -203,10 +209,119 @@ def initialize_binary_matrix(nrows, ncols):
 	# 	np.random.shuffle(bm[i])
 	return bm
 
-def merge(b, b_hist, history_fraction=0.5, permute=False):
-	# hf - history fraction
-	# merge binary values b, b_hist by taking (1 - hf) bits from b, and hf bits from b_hist then concationate
-	 
+class Merge():
+	# functions for different types of merges (combining history and new vector)
+
+	# { "name":"merge_algorithm", "kw":{"help":"Algorithm used combine item and history when forming new address. "
+	#     "wx - Weighted and/or XOR, fl - First/last bits", "choices":["wx","fl"]},
+	# 	  "flag":"ma", "require_initialize":True, "default":"wx"},
+	# 	{ "name":"history_fraction", "kw":{"help":"Fraction of history to store when forming new address."
+	# 	    "(Both wx and fl algorighms)", "type":float}, "flag":"hf", "require_initialize":True, "default":0.5},
+	# 	{ "name":"xor_fraction", "kw":{"help":"Fraction of bits used for xor component in wx algorithm","type":float},
+	# 	  "flag":"xf", "require_initialize":True, "default":0.5},
+
+	def __init__(self, env):
+		self.env = env
+		ma = self.env.pvals["merge_algorithm"]
+		self.pvals = {}
+		if ma == "wx":
+			self.init_wx()
+		elif ma == "fl":
+			self.init_fl()
+		else:
+			sys.exit("Invalid merge_algorithm: %s" % ma)
+
+	def init_wx(self):
+		# wx Weighted and/or XOR algorithm: created address as two parts: weighted history followed by xor
+		# number bits in xor part is xf*N (xf is xor_fraction)
+		# weighted history part formed by selecting (1-hf) N bits from item and hf*N bits from history.
+		# hf is fraction of history to store when forming new address
+		# this function builds the maps selecting bits for the history (not the xor component)
+		xf = self.env.pvals["xor_fraction"]
+		word_length = self.env.pvals["word_length"]
+		wh_len = int(word_length * xf)
+		xr_len = word_length - wh_len
+		self.pvals["wx"] = {"wh_len":wh_len, "xr_len":xr_len}
+		if wh_len > 0:
+			# compute weighted history component
+			# has two parts, new item bits, then history bits
+			hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
+			hist_len = int(hf * wh_len)
+			assert hist_len > 0, "Must have hist_len > 0, hf (%s) or wh_len (%s) is too small" % (hf, wh_len)
+			hist_stride = int(word_length / hist_len)
+			hist_bits = [i for i in range(1, word_length, hist_stride)]
+			if(len(hist_bits) < hist_len):
+				hist_bits.append(0)
+			assert len(hist_bits) == hist_len, "len(hist_bits) %s != hist_len (%s)" % (len(hist_bits), hist_len)
+			item_len = wh_len - hist_len
+			assert item_len > 0, "must have item_len >0, hf (%s) is too large"
+			self.pvals["wx"].update( {"hist_bits": hist_bits, "item_len":item_len} )
+
+
+	def merge_wx(self, item, history):
+		# form address as two components.  First (1-xf*N) bits are weighted history. Remaining bits (xf*N)are permuted XOR.
+		if(self.pvals["wx"]["wh_len"] > 0):
+			# select bits specified by hist_bits and first
+			hist_part = np.concatenate((history[self.pvals["wx"]["hist_bits"]], item[0:self.pvals["wx"]["item_len"]]))
+		if self.pvals["wx"]["xr_len"] == 0:
+			# no xor component
+			assert len(hist_part) == self.env.pvals["word_length"], ("wx algorithm, no xor part, but len(hist_part) %s"
+				" does not match word_length (%s)" % (len(hist_part), self.env.pvals["word_length"]))
+			return hist_part
+		# compute XOR part.  Is permute ( xor component from history) XOR second bits from item.
+		hist_input = history[self.pvals["wx"]["wh_len"]:]
+		item_input = item[self.pvals["wx"]["wh_len"]:]
+		assert len(hist_input) == len(item_input)
+		xor_part = np.logical_xor(np.roll(hist_input, 1), item_input)
+		address = np.concatenate((hist_part, xor_part))
+		assert len(address) == self.env.pvals["word_length"], "wx algorithm, len(address) (%s) != word_length (%s)" % (
+			len(address), self.env.pvals["word_length"])
+		return address
+
+	def init_fl(self):
+		# From Pentti: The first aN bits should be copied from the first aN bits of
+		# the present vector, and the last bN bits should be copied
+		# from the LAST bN bits of the permuted history vector.
+		hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
+		hist_len = int(hf * wh_len)
+		assert hist_len > 0, "fl algorithm: must have hist_len(%s) > 0, hf (%s) is too small" % (hist_len, hf)
+		item_len = self.env.pvals["word_length"] - hist_len
+		assert item_len > 0, "fl algorithm: item_len must be > 0, is %s" % item_len
+		self.pvals["fl"] = {"hist_len":hist_len, "item_len":item_len}
+
+
+	def merge_fl(self, item, history):
+		part_1 = item[0:self.pvals["fl"]["item_len"]]
+		part_2 = np.roll(history, 1)[-self.pvals["fl"]["hist_len"]:]
+		address = np.concatenate((part_1, part_2))
+		assert len(address) == self.env.pvals["word_length"], "fl algorithm, len(address) (%s) != word_length (%s)" % (
+			len(address), self.env.pvals["word_length"])
+		return address
+
+	def merge(self, item, history):
+		# merge item and history to form new address using the current algorithm
+		word_length = self.env.pvals["word_length"]
+		assert word_length == len(item) and word_length == len(history)
+		ma = self.env.pvals["merge_algorithm"]
+		if ma == "wx":
+			address = self.merge_wx(item, history)
+		elif ma == "fl":
+			address = self.merge_fl(item, history)
+		else:
+			sys.exit("Invalid merge_algorithm: %s" % ma)
+		return address
+
+
+def merge_old(bc, b_hist, history_fraction=0.5, permute=False):
+	# bc - binary code for character, b_hist - history binary, hf - history fraction
+	# merge binary values bc, b_hist by taking (1 - hf) bits from bc, and hf bits from b_hist then concationate
+	# calculate number bits from each
+	word_length = len(bc)
+	assert word_length == len(b_hist)
+	n_bits_hist = int(word_length * history_fraction)
+	n_bits_c = word_length - n_bits_hist
+	hist_larger = n_bits_hist 
+	stride 
 	if permute:
 			b3 = np.roll(np.concatenate((b1[0::2],np.roll(b2[0::2], 1))), 1)
 	else:
@@ -291,10 +406,10 @@ def recall(prefix, env):
 	# build address to start searching
 	threshold = env.pvals["word_length"] * env.pvals["char_match_fraction"]
 	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
-	address = merge(b0, b0, env.pvals["permute"])
+	address = env.merge.merge(b0, b0)
 	for char in prefix[1:]:
 		b = env.cmap.char2bin(char)
-		address = merge(b, address, env.pvals["permute"])
+		address = env.merge.merge(b, address)
 	found = [ prefix, ]
 	word2 = prefix
 	# now read sequence using prefix address
@@ -314,7 +429,7 @@ def recall(prefix, env):
 				break
 			# Cleanup by getting b corresponding to top match
 			b = env.cmap.char2bin(found_char)
-		new_address = merge(b, address, env.pvals["permute"])
+		new_address = env.merge.merge(b, address)
 		diff = np.count_nonzero(address!=new_address)
 		found[-1].append("addr_diff=%s" % diff)
 		if diff == 0:
@@ -335,11 +450,11 @@ def store_strings(env, strings):
 	for string in strings:
 		print("storing '%s'" % string)
 		b0 = env.cmap.char2bin(string[0])  # binary word associated with first character
-		address = merge(b0, b0, env.pvals["permute"])
+		address = env.merge.merge(b0, b0)
 		for char in string[1:]+"#":  # add stop character at end
 			b = env.cmap.char2bin(char)
 			env.sdm.store(address, b)   # store code for char using address prev_bin
-			address = merge(b, address, env.pvals["permute"])
+			address = env.merge.merge(b, address)
 		env.record_saved_string(string)
 
 def store_param_strings(env):
