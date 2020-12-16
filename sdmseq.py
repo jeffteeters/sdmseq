@@ -154,6 +154,7 @@ def do_interactive_commands(env):
 		" r - recall param strings\n"
 		" u - update parameters\n"
 		" c - clear memory\n"
+		" t - test merge convergence\n"
 		" i - initalize everything")
 	print(instructions)
 	while True:
@@ -161,7 +162,7 @@ def do_interactive_commands(env):
 			line=input("> ")
 		except EOFError:
 			break;
-		if len(line) == 0 or line[0] not in "sruic":
+		if len(line) == 0 or line[0] not in "sruict":
 			print(instructions)
 			continue
 		cmd = line[0]
@@ -190,6 +191,9 @@ def do_interactive_commands(env):
 		elif cmd == "s":
 			print("store '-s' strings")
 			store_param_strings(env)
+		elif cmd == "t":
+			print("Testing merge algorithm (%s) convergence" % env.pvals["merge_algorithm"])
+			test_merge_convergence(env)
 		else:
 			sys.exit("Invalid command: %s" % cmd)
 	print("\nDone")
@@ -376,10 +380,6 @@ class Merge():
 		# 	index_map[current_index] = shuffled_indices[i]
 		# 	current_index = shuffled_indices[i]
 		# assert len(np.where(index_map==-1)[0]) == 0, "Did not fill all values in index_map"
-
-
-
-
 
 
 	def merge_fl(self, item, history):
@@ -641,6 +641,25 @@ def store_strings(env, strings):
 			env.sdm.store(address, value)
 			address = env.merge.merge(bchar, address)
 		env.record_saved_string(string)
+
+def test_merge_convergence(env):
+	# test how fast address for substring converges to address for full string
+	string = "abcdefghijklmnopqrstuvwxyz"
+	b0 = env.cmap.char2bin(string[0])
+	address = env.merge.merge(b0, b0)
+	b1 = env.cmap.char2bin(string[1])
+	address = env.merge.merge(b1, address)
+	subaddr = env.merge.merge(b1, b1)
+	result = []
+	for char in string[2:]:
+		bchar = env.cmap.char2bin(char)
+		address = env.merge.merge(bchar, address)
+		subaddr = env.merge.merge(bchar, subaddr)
+		distance = hamming(address, subaddr)
+		result.append((char, distance))
+	print("Convergence for merge %s, hf=%s, xf=%s, start_bit=%s:\n%s" % (env.pvals["merge_algorithm"],
+		env.pvals["history_fraction"], env.pvals["xor_fraction"], env.pvals["start_bit"], result))
+
 
 def store_param_strings(env):
 	# store strings provided as parameters in command line (or updated)
