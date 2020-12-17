@@ -32,7 +32,7 @@ python sdmseq.py -h
 The program can be run with the defalut options by:
 
 ```
-python sdmseq.py -h
+python sdmseq.py
 ```
 
 The algorithms tested all implement a function "merge(item, history)" which takes two binary vector
