@@ -71,7 +71,7 @@ are processed.
 
 ## Example run:
 
-# Program startup
+### Program startup
 
 Automaticall saves and recalls test strings when starting.
 
@@ -180,7 +180,10 @@ Enter command, control-d to quit
  i - initalize everything
 >
 ```
-# Change parameter "history_fraction"
+Recall of strings "evans qqqq math" and "cory qqqq eecs" failed because of the history
+stored was not long enough. The recall of the alphabet succeeded.  
+
+### Change parameter "history_fraction"
 
 Value changed from 0.5 (default) to 0.75 to save more of the history.  Increases the time to convergence
 between characters in a string and substring (tested by the "t" command).
@@ -234,7 +237,7 @@ Convergence for merge fl, hf=0.75, xf=0.5, start_bit=0:
 >
 ```
 
-# Rerun store and recall of test strings using increased history_fraction
+### Rerun store and recall of test strings using increased history_fraction
 
 ```
 > s
@@ -321,7 +324,7 @@ found: 'abcdefghijklmnopqrstuvwxyz' - Match
 Now all the test strings can be recalled.
 
 
-# Test recall using substring
+### Test recall using substring
 
 ```
 > r bcdefghi
@@ -355,7 +358,7 @@ found: 'bcdefghijklmnopqrstuvwxyz'
 
 Rest of alpahbet recalled successfully.
 
-# Test recall of long repeats
+### Test recall of long repeats
 
 ```
 > u -s "stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology" "bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering"
@@ -448,7 +451,11 @@ found: 'bechtel hall 20*rrrrrrrrr' - ERROR
 
 Recall of long repeats fails.
 
-# Test long repeats with xor algorithm
+### Test long repeats with xor algorithm
+
+The xor algorithm is specified using "--merge_algorithm" (-ma) "wx" and
+"xor_fraction" (-xf) 1.0.
+
 
 ```
 > u -ma wx -xf 1.0
@@ -579,10 +586,11 @@ found: 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering' - Match
 2 strings, 0 errors
 ```
 
-Recall using xor algorithm works.  However, xor algorithm cannot
+Recall of long repeats using xor algorithm works.  However, xor algorithm cannot
 be used for recall starting with a substring because the
 addresses are computed using the full history of the string.
-There is no convergence to substring characters.
+There is no convergence to substring characters.  This is shown in the
+convergence test below.
 
 ```
 > t
