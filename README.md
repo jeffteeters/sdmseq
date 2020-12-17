@@ -11,6 +11,18 @@ Python 3 and numpy.  Developed using Anaconda Python: https://www.anaconda.com/p
 
 ## Getting Started
 
+Download using:
+
+```
+git clone https://github.com/jeffteeters/sdmseq.git
+```
+
+Then:
+
+```
+cd sdmseq
+```
+
 To see the command line options and default values, run the program with the '-h' opition:
 
 ```
