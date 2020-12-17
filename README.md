@@ -1,7 +1,7 @@
-# sdmseq - Program to test methods of storing sequences in a Sparse Distributed Memory (SDM)
+# sdmseq - Test storing sequences in a SDM
 
 This program provides command-line options and also an interactive shell to test different
-algorithms for storing sequences in a SDM.
+algorithms for storing sequences in a Sparse Distributed Memory (SDM).
 
 ## Requirements.
 
@@ -30,15 +30,15 @@ store the item in the SDM.
 
 The currently implemented algorithms and a description are:
 
-- *hh*  - Concate every other bit of item followed by and every other bit of history.
+- *hh*  - Return is every other bit of item followed by (concated with) every other bit of history.
 
-- *hh2* - same as 'hh' but allows specifying the starting bit (0 or 1) for selecting every other
+- *hh2* - Same as *hh* but allows specifying the starting bit (0 or 1) for selecting every other
   bits.  This is done using the --start_bit or -b flag.
 
-- *fl* - (stands for "first-last").  Concatenate first (1-hf)*N bits of item and last hf*N bits of permuted history.
+- *fl* - (stands for "first-last").  Concatenate first (1-hf)\*N bits of item and last hf\*N bits of permuted history.
   Parameter "hf" is history_fraction, an option set using the "-hf" flag.  Must be between 0 and 1.0.
 
-- *wx* - (stands for weighted and XOR).  Concontate a history made in manner similar to hh and hh2 methods
+- *wx* - (stands for weighted and XOR).  Concontate a history made in manner similar to *hh* and *hh2* methods
   (weighted history component), with a xor component which is made by shifting the history one bit right
   (cyclic) and XOR'ing it with the item.   Flag "--xor_fraction" (-xf) specifies the fraction of bits allocated to
   xor component.  If xf == 1., the xor component takes up all the bits.  If xf==0, only the weighted history component
