@@ -16,17 +16,17 @@ class Env:
 	# command line arguments, also used for parsing interactive update of parameters
 	parms = [
 		{ "name":"word_length", "kw":{"help":"Word length for address and memory", "type":int},
-	 	  "flag":"w", "required_init":"i", "default":256 },
+	 	  "flag":"w", "required_init":"i", "default":512 },
 	 	{ "name":"num_rows", "kw":{"help":"Number rows in memory","type":int},
-	 	  "flag":"r", "required_init":"i", "default":512 },
+	 	  "flag":"r", "required_init":"i", "default":2048 },
 	 	{ "name":"activation_count", "kw":{"help":"Number memory rows to activate for each address","type":int},
-	 	  "flag":"a", "required_init":"m", "default":5},
+	 	  "flag":"a", "required_init":"m", "default":20},
 	 	{ "name":"char_match_fraction", "kw": {"help":"Fraction of word_length to form hamming distance threshold for"
 			" matching character to item memory","type":float},"flag":"cmf", "required_init":"", "default":0.25},
 		{ "name":"merge_algorithm", "kw":{"help":"Algorithm used combine item and history when forming new address. "
 		    "wx - Weighted and/or XOR, wx2 - save xor with data, fl - First/last bits, hh - concate every other bit",
 		    "choices":["wx", "wx2", "fl", "hh", "hh2"]},
-	 	  "flag":"ma", "required_init":"m", "default":"hh2"},
+	 	  "flag":"ma", "required_init":"m", "default":"fl"},
 		# { "name":"permute", "kw":{"help":"Permute values when storing","type":int, "choices":[0, 1]},
 		# 	  "flag":"p", "required_init":True, "default":0},
 		{ "name":"start_bit", "kw":{"help":"Starting bit for debugging","type":int, "choices":[0, 1]},
@@ -39,8 +39,12 @@ class Env:
 		   "flag":"d", "required_init":"", "default":0},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "required_init":"",
 		  "flag":"s", "default":
-		  '"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
-		  ' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'
+		  '"cory qqqq eecs" "evans qqqq math" '
+		  '"abcdefghijklmnopqrstuvwxyz" '
+		  # '"stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology" '
+		  # '"bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering"'
+		  # '"happy day" "evans hall" "campanile" "sutardja dai hall" "oppenheimer"'
+		  #' "distributed memory" "abcdefghijklmnopqrstuvwxyz"'
 		  # ' "Evans rrrrr math" "Corey rrrrr eecs"'
 		  }]
 
@@ -570,8 +574,8 @@ def recall(prefix, env):
 		diff = np.count_nonzero(history!=new_address)
 		found[-1].append("addr_diff=%s" % diff)
 		if diff == 0:
-			found[-1].append("\nfound fixed point, address=\n%s" % (
-				bina2str(new_address)))
+			found[-1].append("found fixed point in address")
+			    #, address=\n%s" % (bina2str(new_address)))
 			break
 		address = new_address
 		word2 += found_char
@@ -645,7 +649,7 @@ def recall_strings(env, strings, prefix_mode = False):
 		else:
 			print("found: '%s'" % word2)
 	if not prefix_mode:
-		print("%s words, %s errors" % (len(strings), error_count))
+		print("%s strings, %s errors" % (len(strings), error_count))
 
 def recall_param_strings(env):
 	# recall stored sequences starting with first character

@@ -69,3 +69,529 @@ aligned substring.  If the algorithm is working, the hamming distance should go 
 are processed.
 
 
+## Example run:
+
+# Program startup
+
+Automaticall saves and recalls test strings when starting.
+
+
+```
+$ python sdmseq.py 
+Initializing.
+Current settings:
+ word_length: 512
+ num_rows: 2048
+ activation_count: 20
+ char_match_fraction: 0.25
+ merge_algorithm: fl
+ start_bit: 0
+ history_fraction: 0.5
+ xor_fraction: 0.5
+ debug: 0
+ string_to_store: ['cory qqqq eecs', 'evans qqqq math', 'abcdefghijklmnopqrstuvwxyz']
+Saved strings=[]
+storing 'cory qqqq eecs'
+storing 'evans qqqq math'
+storing 'abcdefghijklmnopqrstuvwxyz'
+
+Recall 'cory qqqq eecs'
+[   'c',
+    [('o', 0), ('i', 230), (' ', 239), 'addr_diff=177'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=210'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=230'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=252'],
+    [('q', 34), ('o', 215), ('m', 219), 'addr_diff=269'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=138'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=63'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=27'],
+    [('r', 116), ('q', 130), (' ', 144), 'addr_diff=131'],
+    [('s', 123), ('e', 128), ('m', 135), 'addr_diff=202'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=223'],
+    [('u', 0), ('t', 242), ('#', 242), 'addr_diff=239'],
+    [('v', 0), ('m', 239), ('a', 240), 'addr_diff=245'],
+    [('w', 0), ('t', 236), ('c', 238), 'addr_diff=250'],
+    [('x', 0), ('g', 236), ('b', 242), 'addr_diff=259'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=262'],
+    [('z', 0), ('d', 239), ('j', 245), 'addr_diff=246'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'cory qqqq eecs'
+found: 'cory qqqqrstuvwxyz' - ERROR
+
+Recall 'evans qqqq math'
+[   'e',
+    [('v', 0), ('m', 239), ('a', 240), 'addr_diff=199'],
+    [('a', 0), ('g', 238), ('#', 239), 'addr_diff=226'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=228'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=242'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=246'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=267'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=136'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=63'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=28'],
+    [('q', 67), ('r', 179), (' ', 207), 'addr_diff=14'],
+    [(' ', 126), ('q', 148), ('j', 237), 'addr_diff=142'],
+    [('e', 126), ('m', 137), ('o', 193), 'addr_diff=197'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=101'],
+    [('c', 0), ('w', 238), ('y', 244), 'addr_diff=173'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=215'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'evans qqqq math'
+found: 'evans qqqqq eecs' - ERROR
+
+Recall 'abcdefghijklmnopqrstuvwxyz'
+[   'a',
+    [('b', 0), ('l', 235), ('m', 237), 'addr_diff=194'],
+    [('c', 0), ('w', 238), ('y', 244), 'addr_diff=221'],
+    [('d', 0), ('z', 239), ('k', 242), 'addr_diff=240'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=244'],
+    [('f', 0), ('j', 237), ('t', 239), 'addr_diff=247'],
+    [('g', 0), ('x', 236), ('a', 238), 'addr_diff=270'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=267'],
+    [('i', 0), ('o', 230), ('b', 241), 'addr_diff=260'],
+    [('j', 0), ('n', 235), ('h', 236), 'addr_diff=266'],
+    [('k', 0), ('e', 239), ('h', 240), 'addr_diff=268'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=261'],
+    [('m', 0), ('r', 229), ('h', 232), 'addr_diff=257'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=265'],
+    [('o', 0), ('i', 230), (' ', 239), 'addr_diff=280'],
+    [('p', 0), ('w', 241), ('#', 245), 'addr_diff=244'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=245'],
+    [('r', 55), ('l', 178), ('q', 191), 'addr_diff=234'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=248'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=247'],
+    [('u', 0), ('t', 242), ('#', 242), 'addr_diff=252'],
+    [('v', 0), ('m', 239), ('a', 240), 'addr_diff=251'],
+    [('w', 0), ('t', 236), ('c', 238), 'addr_diff=254'],
+    [('x', 0), ('g', 236), ('b', 242), 'addr_diff=263'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=263'],
+    [('z', 0), ('d', 239), ('j', 245), 'addr_diff=246'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'abcdefghijklmnopqrstuvwxyz'
+found: 'abcdefghijklmnopqrstuvwxyz' - Match
+3 strings, 2 errors
+Enter command, control-d to quit
+ s <string> - store new string(s) OR param strings (if none specified)
+ r <prefix> - recall starting with prefix
+ r - recall param strings
+ u - update parameters
+ c - clear memory
+ t - test merge convergence
+ i - initalize everything
+>
+```
+# Change parameter "history_fraction"
+
+Value changed from 0.5 (default) to 0.75 to save more of the history.  Increases the time to convergence
+between characters in a string and substring (tested by the "t" command).
+
+```
+> t
+Testing merge algorithm (fl) convergence
+Convergence for merge fl, hf=0.5, xf=0.5, start_bit=0:
+[('c', 69), ('d', 35), ('e', 19), ('f', 12), ('g', 5), ('h', 4), ('i', 2), ('j', 0), ('k', 0),
+ ('l', 0), ('m', 0), ('n', 0), ('o', 0), ('p', 0), ('q', 0), ('r', 0), ('s', 0), ('t', 0),
+ ('u', 0), ('v', 0), ('w', 0), ('x', 0), ('y', 0), ('z', 0)]
+> u
+update parameter settings 
+Current settings:
+ word_length: 512
+ num_rows: 2048
+ activation_count: 20
+ char_match_fraction: 0.25
+ merge_algorithm: fl
+ start_bit: 0
+ history_fraction: 0.5
+ xor_fraction: 0.5
+ debug: 0
+ string_to_store: ['cory qqqq eecs', 'evans qqqq math', 'abcdefghijklmnopqrstuvwxyz']
+Saved strings=['cory qqqq eecs', 'evans qqqq math', 'abcdefghijklmnopqrstuvwxyz']
+Update settings using 'u' followed by KEY VALUE pair(s), where keys are:
+-w --word_length; -r --num_rows; -a --activation_count; -cmf --char_match_fraction; -ma --merge_algorithm; -b --start_bit; -hf --history_fraction; -xf --xor_fraction; -d --debug; -s --string_to_store
+> u -hf 0.75
+update parameter settings -hf 0.75
+Updated: history_fraction=0.75
+Current settings:
+ word_length: 512
+ num_rows: 2048
+ activation_count: 20
+ char_match_fraction: 0.25
+ merge_algorithm: fl
+ start_bit: 0
+ history_fraction: 0.75
+ xor_fraction: 0.5
+ debug: 0
+ string_to_store: ['cory qqqq eecs', 'evans qqqq math', 'abcdefghijklmnopqrstuvwxyz']
+Saved strings=['cory qqqq eecs', 'evans qqqq math', 'abcdefghijklmnopqrstuvwxyz']
+required_init=m
+> t
+Clearing memory.
+Testing merge algorithm (fl) convergence
+Convergence for merge fl, hf=0.75, xf=0.5, start_bit=0:
+[('c', 136), ('d', 109), ('e', 88), ('f', 66), ('g', 52), ('h', 39), ('i', 23), ('j', 16), ('k', 13),
+ ('l', 10), ('m', 9), ('n', 8), ('o', 5), ('p', 4), ('q', 1), ('r', 0), ('s', 0), ('t', 0), ('u', 0),
+ ('v', 0), ('w', 0), ('x', 0), ('y', 0), ('z', 0)]
+>
+```
+
+# Rerun store and recall of test strings using increased history_fraction
+
+```
+> s
+store '-s' strings
+storing 'cory qqqq eecs'
+storing 'evans qqqq math'
+storing 'abcdefghijklmnopqrstuvwxyz'
+> r
+recall stored strings
+
+Recall 'cory qqqq eecs'
+[   'c',
+    [('o', 0), ('i', 230), (' ', 239), 'addr_diff=212'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=223'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=231'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=251'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=250'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=184'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=140'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=114'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=149'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=177'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=138'],
+    [('c', 0), ('w', 238), ('y', 244), 'addr_diff=160'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=180'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'cory qqqq eecs'
+found: 'cory qqqq eecs' - Match
+
+Recall 'evans qqqq math'
+[   'e',
+    [('v', 0), ('m', 239), ('a', 240), 'addr_diff=216'],
+    [('a', 0), ('g', 238), ('#', 239), 'addr_diff=229'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=220'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=230'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=239'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=230'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=173'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=124'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=88'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=126'],
+    [('m', 0), ('r', 229), ('h', 232), 'addr_diff=151'],
+    [('a', 0), ('g', 238), ('#', 239), 'addr_diff=176'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=189'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=208'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'evans qqqq math'
+found: 'evans qqqq math' - Match
+
+Recall 'abcdefghijklmnopqrstuvwxyz'
+[   'a',
+    [('b', 0), ('l', 235), ('m', 237), 'addr_diff=204'],
+    [('c', 0), ('w', 238), ('y', 244), 'addr_diff=214'],
+    [('d', 0), ('z', 239), ('k', 242), 'addr_diff=219'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=231'],
+    [('f', 0), ('j', 237), ('t', 239), 'addr_diff=244'],
+    [('g', 0), ('x', 236), ('a', 238), 'addr_diff=247'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=256'],
+    [('i', 0), ('o', 230), ('b', 241), 'addr_diff=246'],
+    [('j', 0), ('n', 235), ('h', 236), 'addr_diff=254'],
+    [('k', 0), ('e', 239), ('h', 240), 'addr_diff=254'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=254'],
+    [('m', 0), ('r', 229), ('h', 232), 'addr_diff=256'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=277'],
+    [('o', 0), ('i', 230), (' ', 239), 'addr_diff=275'],
+    [('p', 0), ('w', 241), ('#', 245), 'addr_diff=257'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=255'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=244'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=269'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=254'],
+    [('u', 0), ('t', 242), ('#', 242), 'addr_diff=260'],
+    [('v', 0), ('m', 239), ('a', 240), 'addr_diff=264'],
+    [('w', 0), ('t', 236), ('c', 238), 'addr_diff=256'],
+    [('x', 0), ('g', 236), ('b', 242), 'addr_diff=251'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=255'],
+    [('z', 0), ('d', 239), ('j', 245), 'addr_diff=259'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'abcdefghijklmnopqrstuvwxyz'
+found: 'abcdefghijklmnopqrstuvwxyz' - Match
+3 strings, 0 errors
+>
+```
+
+Now all the test strings can be recalled.
+
+
+# Test recall using substring
+
+```
+> r bcdefghi
+recall prefix bcdefghi
+
+Recall 'bcdefghi'
+[   'bcdefghi',
+    [('j', 0), ('n', 235), ('h', 236), 'addr_diff=249'],
+    [('k', 0), ('e', 239), ('h', 240), 'addr_diff=249'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=249'],
+    [('m', 0), ('r', 229), ('h', 232), 'addr_diff=251'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=272'],
+    [('o', 0), ('i', 230), (' ', 239), 'addr_diff=270'],
+    [('p', 0), ('w', 241), ('#', 245), 'addr_diff=254'],
+    [('q', 0), ('t', 237), ('g', 240), 'addr_diff=252'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('s', 0), (' ', 243), ('n', 243), 'addr_diff=269'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=254'],
+    [('u', 0), ('t', 242), ('#', 242), 'addr_diff=260'],
+    [('v', 0), ('m', 239), ('a', 240), 'addr_diff=264'],
+    [('w', 0), ('t', 236), ('c', 238), 'addr_diff=256'],
+    [('x', 0), ('g', 236), ('b', 242), 'addr_diff=251'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=255'],
+    [('z', 0), ('d', 239), ('j', 245), 'addr_diff=259'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'bcdefghi'
+found: 'bcdefghijklmnopqrstuvwxyz'
+> 
+
+```
+
+Rest of alpahbet recalled successfully.
+
+# Test recall of long repeats
+
+```
+> u -s "stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology" "bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering"
+update parameter settings -s "stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology" "bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering"
+Updated: string_to_store=['stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology', 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering']
+Current settings:
+ word_length: 512
+ num_rows: 2048
+ activation_count: 20
+ char_match_fraction: 0.25
+ merge_algorithm: fl
+ start_bit: 0
+ history_fraction: 0.75
+ xor_fraction: 0.5
+ debug: 0
+ string_to_store: ['stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology', 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering']
+Saved strings=['cory qqqq eecs', 'evans qqqq math', 'abcdefghijklmnopqrstuvwxyz']
+required_init=
+> c
+Clearing memory.
+> s
+store '-s' strings
+storing 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology'
+storing 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering'
+> r
+recall stored strings
+
+Recall 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology'
+[   's',
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=209'],
+    [('a', 0), ('0', 234), ('g', 238), 'addr_diff=224'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=217'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=232'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=226'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=229'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=243'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=250'],
+    [('a', 0), ('0', 234), ('g', 238), 'addr_diff=249'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=249'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=184'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=196'],
+    [('2', 0), ('q', 235), ('0', 237), 'addr_diff=223'],
+    [('0', 0), ('k', 231), ('a', 234), 'addr_diff=234'],
+    [('*', 0), ('x', 231), ('q', 241), 'addr_diff=249'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=249'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=196'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=145'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=111'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=84'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=67'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=51'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=37'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=27'],
+    [('r', 130), ('a', 238), ('z', 238)]]
+Recall 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology'
+found: 'stanley hall 20*rrrrrrrrr' - ERROR
+
+Recall 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering'
+[   'b',
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=199'],
+    [('c', 0), ('w', 238), ('y', 244), 'addr_diff=212'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=230'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=242'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=241'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=238'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=235'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=251'],
+    [('a', 0), ('0', 234), ('g', 238), 'addr_diff=252'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=251'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=180'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=201'],
+    [('2', 0), ('q', 235), ('0', 237), 'addr_diff=228'],
+    [('0', 0), ('k', 231), ('a', 234), 'addr_diff=236'],
+    [('*', 0), ('x', 231), ('q', 241), 'addr_diff=253'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=251'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=196'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=146'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=114'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=86'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=67'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=51'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=35'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=26'],
+    [('r', 130), ('a', 238), ('z', 238)]]
+Recall 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering'
+found: 'bechtel hall 20*rrrrrrrrr' - ERROR
+2 strings, 2 errors
+> 
+```
+
+Recall of long repeats fails.
+
+# Test long repeats with xor algorithm
+
+```
+> u -ma wx -xf 1.0
+update parameter settings -ma wx -xf 1.0
+Updated: merge_algorithm=wx, xor_fraction=1.0
+Current settings:
+ word_length: 512
+ num_rows: 2048
+ activation_count: 20
+ char_match_fraction: 0.25
+ merge_algorithm: wx
+ start_bit: 0
+ history_fraction: 0.75
+ xor_fraction: 1.0
+ debug: 0
+ string_to_store: ['stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology', 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering']
+Saved strings=['stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology', 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering']
+required_init=mm
+> s
+Clearing memory.
+store '-s' strings
+storing 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology'
+storing 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering'
+> r
+recall stored strings
+
+Recall 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology'
+[   's',
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=262'],
+    [('a', 0), ('0', 234), ('g', 238), 'addr_diff=253'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=261'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=264'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=259'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=248'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=265'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=256'],
+    [('a', 0), ('0', 234), ('g', 238), 'addr_diff=263'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=248'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=248'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=267'],
+    [('2', 0), ('q', 235), ('0', 237), 'addr_diff=256'],
+    [('0', 0), ('k', 231), ('a', 234), 'addr_diff=249'],
+    [('*', 0), ('x', 231), ('q', 241), 'addr_diff=238'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=243'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=267'],
+    [('b', 0), ('l', 235), ('m', 237), 'addr_diff=257'],
+    [('i', 0), ('o', 230), ('b', 241), 'addr_diff=252'],
+    [('o', 0), ('i', 230), ('2', 238), 'addr_diff=260'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=244'],
+    [('o', 0), ('i', 230), ('2', 238), 'addr_diff=260'],
+    [('g', 0), ('x', 236), ('a', 238), 'addr_diff=249'],
+    [('y', 0), ('a', 243), ('c', 244), 'addr_diff=252'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology'
+found: 'stanley hall 20*rrrrrrrrrrrrrrrrrrrr biology' - Match
+
+Recall 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering'
+[   'b',
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=257'],
+    [('c', 0), ('w', 238), ('y', 244), 'addr_diff=254'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=260'],
+    [('t', 0), ('w', 236), ('q', 237), 'addr_diff=266'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=267'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=272'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=253'],
+    [('h', 0), ('n', 225), ('m', 232), 'addr_diff=250'],
+    [('a', 0), ('0', 234), ('g', 238), 'addr_diff=259'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=258'],
+    [('l', 0), ('r', 233), ('b', 235), 'addr_diff=258'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=277'],
+    [('2', 0), ('q', 235), ('0', 237), 'addr_diff=264'],
+    [('0', 0), ('k', 231), ('a', 234), 'addr_diff=247'],
+    [('*', 0), ('x', 231), ('q', 241), 'addr_diff=250'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=263'],
+    [(' ', 0), ('o', 239), ('s', 243), 'addr_diff=265'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=257'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=241'],
+    [('g', 0), ('x', 236), ('a', 238), 'addr_diff=243'],
+    [('i', 0), ('o', 230), ('b', 241), 'addr_diff=270'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=239'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=253'],
+    [('e', 0), ('r', 236), ('k', 239), 'addr_diff=253'],
+    [('r', 0), ('m', 229), ('l', 233), 'addr_diff=259'],
+    [('i', 0), ('o', 230), ('b', 241), 'addr_diff=270'],
+    [('n', 0), ('h', 225), ('#', 227), 'addr_diff=261'],
+    [('g', 0), ('x', 236), ('a', 238), 'addr_diff=267'],
+    [('#', 0), ('n', 227), ('a', 239)]]
+Recall 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering'
+found: 'bechtel hall 20*rrrrrrrrrrrrrrrrrrrr engineering' - Match
+2 strings, 0 errors
+```
+
+Recall using xor algorithm works.  However, xor algorithm cannot
+be used for recall starting with a substring because the
+addresses are computed using the full history of the string.
+There is no convergence to substring characters.
+
+```
+> t
+Testing merge algorithm (wx) convergence
+Convergence for merge wx, hf=0.75, xf=1.0, start_bit=0:
+[('c', 235), ('d', 235), ('e', 235), ('f', 235), ('g', 235), ('h', 235), ('i', 235), ('j', 235), ('k', 235),
+ ('l', 235), ('m', 235), ('n', 235), ('o', 235), ('p', 235), ('q', 235), ('r', 235), ('s', 235), ('t', 235),
+ ('u', 235), ('v', 235), ('w', 235), ('x', 235), ('y', 235), ('z', 235)]
+> 
+```
+
+
