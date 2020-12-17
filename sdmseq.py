@@ -45,8 +45,6 @@ class Env:
 		  }]
 
 	def __init__(self):
-		# self.state = {"initialized": False, "initialized_required": False, "cleared": False, "cleared_required": False}
-		# self.state = {"initialize_needed": False, "clear_": False, "cleared": False, "cleared_required": False}
 		self.parse_command_arguments()
 		self.initialize()
 		self.display_settings()
@@ -65,18 +63,14 @@ class Env:
 		self.pvals["string_to_store"] = shlex.split(self.pvals["string_to_store"])
 
 	def initialize(self):
-		# initialize sdm and char_map
+		# initialize sdm, char_map and merge
 		word_length = self.pvals["word_length"]
-		# if not required_init:
-		# 	self.cmap.re
 		print("Initializing.")
 		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length)
 		self.sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=self.pvals["num_rows"],
 			debug=self.pvals["debug"])
 		self.merge = Merge(self)
 		self.saved_strings = []
-		# self.state["initialized"] = True
-		# self.state["initialized_required"] = False
 		self.required_init = ""  # contains chars: 'i' - initialize structures, 'm' - clear memory, '' - none-needed
 
 	def record_saved_string(self, string):
@@ -91,10 +85,6 @@ class Env:
 			self.merge.initialize()
 		else:
 			assert self.required_init == "", "invalid char in required_init: %s" % self.required_init
-
-	# def ensure_cleared(self):
-	# 	elif 'c' in self.required_init and len(self.saved_strings) > 0:
-	# 		self.clear()
 
 	def clear(self):
 		if 'i' in self.required_init:
@@ -198,13 +188,6 @@ def do_interactive_commands(env):
 			sys.exit("Invalid command: %s" % cmd)
 	print("\nDone")
 
-
-# class Sequences:
-# 	# sequences learned
-# 	def __init__(self, seq = ["happy_day", "evans_hall", "campanile", "sutardja_dai_hall", "oppenheimer"]):
-# 		self.seq = seq
-
-
 # def random_b(word_length):
 # 	# return binary vector with equal number of 1's and 0's
 # 	assert word_length % 2 == 0, "word_length must be even"
@@ -226,6 +209,7 @@ def find_matches(m, b, nret, index_only = False):
 		ndiff = np.count_nonzero(m[i]!=b)
 		matches.append( (i, ndiff) )
 	matches.sort(key=itemgetter(1))
+	# if ties in hamming distance, make sure the first rows (lowest index number) are selected
 	hamming = matches[nret-1][1]
 	nh = 1
 	while matches[nret-1+nh][1] == hamming:
@@ -243,12 +227,23 @@ def initialize_binary_matrix(nrows, ncols):
 	# create binary matrix with each row having binary random number
 	assert ncols % 2 == 0, "ncols must be even"
 	bm = np.random.randint(2, size=(nrows, ncols), dtype=np.int8)
+	# if wanted same number of zeros and ones, code below could be used.
 	# hw = ncols / 2
 	# bm = np.zeros( (nrows, ncols), dtype=dtype=np.int8) # bm - binary_matrix
 	# for i in range(nrows):
 	# 	bm[i][0:hw] = 1				# set half of row to 1, then shuffle
 	# 	np.random.shuffle(bm[i])
 	return bm
+
+def make_permutation_map(length):
+	# create permutation map for history vector.  This done because the numpy function I found
+	# np.random.RandomState(seed=42).permutation(b) does not always include all the elements in
+	# the permutation
+	shuffled_indices = np.arange(length)
+	np.random.shuffle(shuffled_indices)
+	# map each index to the next one in the shuffled list
+	map_index = [shuffled_indices[(i+1) % length] for i in range(length)]
+	return map_index
 
 class Merge():
 	# functions for different types of merges (combining history and new vector)
@@ -289,6 +284,7 @@ class Merge():
 		if wh_len > 0:
 			# compute weighted history component
 			# has two parts, new item bits, then history bits
+			# this code has a bug, may not work unless history_fraction == 0.5
 			hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
 			hist_len = int(hf * wh_len)
 			assert hist_len > 0, "Must have hist_len > 0, hf (%s) or wh_len (%s) is too small" % (hf, wh_len)
@@ -302,23 +298,6 @@ class Merge():
 			assert item_len > 0, "must have item_len >0, hf (%s) is too large"
 			self.pvals["wx"].update( {"hist_bits": hist_bits, "item_len":item_len} )
 
-		# if wh_len > 0:
-		# 	# compute weighted history component
-		# 	# has two parts, new item bits, then history bits
-		# 	hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
-		# 	hist_len = int(hf * wh_len)
-		# 	assert hist_len > 0, "Must have hist_len > 0, hf (%s) or wh_len (%s) is too small" % (hf, wh_len)
-		# 	hist_stride = int(word_length / hist_len)
-		# 	start_bit = self.env.pvals["start_bit"]
-		# 	hist_bits = [i for i in range(start_bit, word_length, hist_stride)]
-		# 	if(len(hist_bits) < hist_len):
-		# 		hist_bits.append(0)
-		# 	assert len(hist_bits) == hist_len, "len(hist_bits) %s != hist_len (%s)" % (len(hist_bits), hist_len)
-		# 	item_len = wh_len - hist_len
-		# 	assert item_len > 0, "must have item_len >0, hf (%s) is too large"
-		# 	self.pvals["wx"].update( {"hist_bits": hist_bits, "item_len":item_len} )
-
-
 	def merge_wx(self, item, history):
 		# form address as two components.  First (1-xf*N) bits are weighted history. Remaining bits (xf*N)are permuted XOR.
 		if(self.pvals["wx"]["wh_len"] > 0):
@@ -330,6 +309,7 @@ class Merge():
 					" does not match word_length (%s)" % (len(hist_part), self.env.pvals["word_length"]))
 				return hist_part
 		# compute XOR part.  Is permute ( xor component from history) XOR second bits from item.
+		# if wh_len is zero then is pure XOR algorithm
 		hist_input = history[self.pvals["wx"]["wh_len"]:]
 		item_input = item[self.pvals["wx"]["wh_len"]:]
 		assert len(hist_input) == len(item_input)
@@ -367,25 +347,14 @@ class Merge():
 		item_len = self.env.pvals["word_length"] - hist_len
 		assert item_len > 0, "fl algorithm: item_len must be > 0, is %s" % item_len
 		self.pvals["fl"] = {"hist_len":hist_len, "item_len":item_len}
-		# create permutation map for history vector (Probably not needed)
-		# shuffled_indices = np.arange(self.env.pvals["word_length"])
-		# np.random.shuffle(shuffled_indices)
-		# if shuffled_indices[0] == 0:
-		# 	# don't let first index be zero, swap it with 2nd index
-		# 	# swap from: https://stackoverflow.com/questions/22847410/swap-two-values-in-a-numpy-array
-		# 	shuffled_indices[[0,1]] = shuffled_indices[[1,0]]
-		# index_map = np.full(self.env.pvals["word_length"], -1, dtype=np.int)
-		# current_index = 0
-		# for i in range(self.env.pvals["word_length"]):
-		# 	index_map[current_index] = shuffled_indices[i]
-		# 	current_index = shuffled_indices[i]
-		# assert len(np.where(index_map==-1)[0]) == 0, "Did not fill all values in index_map"
-
+		self.pvals["shuffle_map"] = make_permutation_map(self.env.pvals["word_length"])
 
 	def merge_fl(self, item, history):
 		part_1 = item[0:self.pvals["fl"]["item_len"]]
 		# np.random.RandomState(seed=42).permutation(history)
-		part_2 = np.random.RandomState(seed=42).permutation(history)[-self.pvals["fl"]["hist_len"]:]
+		# routine "np.random.RandomState(seed=42).permutation(history)" skips some elements, can't use following
+		# part_2 = np.random.RandomState(seed=42).permutation(history)[-self.pvals["fl"]["hist_len"]:]
+		part_2 = history[self.pvals["shuffle_map"]][-self.pvals["fl"]["hist_len"]:]
 		address = np.concatenate((part_1, part_2))
 		assert len(address) == self.env.pvals["word_length"], "fl algorithm, len(address) (%s) != word_length (%s)" % (
 			len(address), self.env.pvals["word_length"])
@@ -557,13 +526,6 @@ def recall(prefix, env):
 	debug = env.pvals["debug"]
 	# start_bit = env.pvals["start_bit"]
 	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
-	# if ma == "wx2":
-	# 	# for wx2 algorithm, initial history is .5 b0 + 0.5 b0; data to store is 0.5 char_2 + 0.5 b0
-	# 	b0_half = b0[start_bit::2]
-	# 	init_hist = np.np.concatenate((b0_half, b0_half))
-	# 	address = env.merge.merge(b0, init_hist)
-	# else:
-	# 	address = env.merge.merge(b0, b0)
 	address = env.merge.merge(b0, b0)
 	for char in prefix[1:]:
 		b = env.cmap.char2bin(char)
@@ -579,11 +541,9 @@ def recall(prefix, env):
 		if ma == "wx2":
 			bchar = expand(b[0:wl_half])
 			xor_part = b[wl_half:]
-			if True: # debug:
+			if debug:
 				computed_xor_part = computed_address[wl_half:]
 				print(" xor hamming =%s" % hamming(computed_xor_part, xor_part))
-				# print(" xor hamming =%s, computed_part = %s, found=%s" % (
-				# 	hamming(computed_xor_part, xor_part), bina2str(computed_xor_part), bina2str(xor_part)))
 		else:
 			bchar = b
 		top_matches = env.cmap.bin2char(bchar)
@@ -690,7 +650,6 @@ def recall_strings(env, strings, prefix_mode = False):
 def recall_param_strings(env):
 	# recall stored sequences starting with first character
 	recall_strings(env, env.pvals["string_to_store"])
-
 
 def main():
 	env = Env()
