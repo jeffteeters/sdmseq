@@ -17,7 +17,7 @@ Download using:
 git clone https://github.com/jeffteeters/sdmseq.git
 ```
 
-Then:
+then:
 
 ```
 cd sdmseq
