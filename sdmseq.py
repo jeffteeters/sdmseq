@@ -26,17 +26,19 @@ class Env:
 		{ "name":"merge_algorithm", "kw":{"help":"Algorithm used combine item and history when forming new address. "
 		    "wx - Weighted and/or XOR, wx2 - save xor with data, fl - First/last bits, hh - concate every other bit",
 		    "choices":["wx", "wx2", "fl", "hh", "hh2"]},
-	 	  "flag":"ma", "required_init":"m", "default":"wx"},
+	 	  "flag":"ma", "required_init":"m", "default":"wx2"},
 		# { "name":"permute", "kw":{"help":"Permute values when storing","type":int, "choices":[0, 1]},
 		# 	  "flag":"p", "required_init":True, "default":0},
 		{ "name":"start_bit", "kw":{"help":"Starting bit for debugging","type":int, "choices":[0, 1]},
 		  "flag":"b", "required_init":"m", "default":0},
-	 	{ "name":"history_fraction", "kw":{"help":"Fraction of history to store when forming new address."
-	 	    "(Both wx and fl algorighms)", "type":float}, "flag":"hf", "required_init":"m", "default":0.5},
+	 	{ "name":"history_fraction", "kw":{"help":"Fraction of history to store when forming new address "
+	 	    "(Both wx and fl algorighms)", "type":float},
+	 	    "flag":"hf", "required_init":"m", "default":0.5},
 	 	{ "name":"xor_fraction", "kw":{"help":"Fraction of bits used for xor component in wx algorithm","type":float},
 	 	  "flag":"xf", "required_init":"m", "default":0.5},
 	 	{ "name":"first_bin_fraction", "kw":{"help":"First bin fraction, fraction of bits of item used for first bin "
-	 	  "in wx algorithm","type":float}, "flag":"fbf", "required_init":"m", "default":0.5},
+	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins","type":float}, "flag":"fbf",
+	 	  "required_init":"m", "default":8},
 	 	{ "name":"debug", "kw":{"help":"Debug mode","type":int, "choices":[0, 1]},
 		   "flag":"d", "required_init":"", "default":0},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "required_init":"",
@@ -77,7 +79,7 @@ class Env:
 		print("Initializing.")
 		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length, repeat=repeat)
 		self.sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=self.pvals["num_rows"],
-			debug=self.pvals["debug"])
+			nact = self.pvals["activation_count"], debug=self.pvals["debug"])
 		self.merge = Merge(self)
 		self.saved_strings = []
 		self.required_init = ""  # contains chars: 'i' - initialize structures, 'm' - clear memory, '' - none-needed
@@ -303,27 +305,37 @@ class Merge():
 			# has two parts, new item bits, then history bits
 			# this code has a bug, may not work unless history_fraction == 0.5
 			fbf = self.env.pvals["first_bin_fraction"]  # fraction of wh_len used for first bin (bits from current item)
-			bin_sizes = []
-			bin0_len = int(fbf * wh_len)
-			bits_left = wh_len - bin0_len
-			bin_sizes.append(bin0_len)
-			ibin = 0
-			min_bin_size = 4
-			while bits_left > min_bin_size:
-				next_bin_size = round(bin_sizes[ibin] * fbf)
-				if next_bin_size  < min_bin_size:
-					next_bin_size = min(min_bin_size, bits_left)
-				bin_sizes.append(next_bin_size)
-				bits_left -= next_bin_size
-				ibin += 1
-			if bits_left > 0:
-				# distribute remaining bits in previous bins
-				# from: https://stackoverflow.com/questions/21713631/distribute-items-in-buckets-equally-best-effort
-				new_bits_per_bin = int(bits_left / (len(bin_sizes) - 1))
-				remaining_bits = bits_left % (len(bin_sizes) - 1)
-				for ibin in range(1, len(bin_sizes)):
-					extra = 1 if ibin <= remaining_bits else 0
-					bin_sizes[ibin] += new_bits_per_bin + extra
+			if fbf > 1.0:
+				# equal size bins
+				num_bins = int(fbf)
+				bits_per_bin = int(wh_len/num_bins)
+				remaining_bits = wh_len % num_bins
+				bin_sizes = [ bits_per_bin + (1 if i < remaining_bits else 0) for i in range(num_bins)]
+				bin0_len = bin_sizes[0]
+			else:
+				# bin sizes are specified by exponential decay (hf) of initial bin 
+				hf = self.env.pvals["history_fraction"]
+				bin_sizes = []
+				bin0_len = int(fbf * wh_len)
+				bits_left = wh_len - bin0_len
+				bin_sizes.append(bin0_len)
+				ibin = 0
+				min_bin_size = 4
+				while bits_left > min_bin_size:
+					next_bin_size = round(bin_sizes[ibin] * hf)
+					if next_bin_size  < min_bin_size:
+						next_bin_size = min(min_bin_size, bits_left)
+					bin_sizes.append(next_bin_size)
+					bits_left -= next_bin_size
+					ibin += 1
+				if bits_left > 0:
+					# distribute remaining bits in previous bins
+					# from: https://stackoverflow.com/questions/21713631/distribute-items-in-buckets-equally-best-effort
+					new_bits_per_bin = int(bits_left / (len(bin_sizes) - 1))
+					remaining_bits = bits_left % (len(bin_sizes) - 1)
+					for ibin in range(1, len(bin_sizes)):
+						extra = 1 if ibin <= remaining_bits else 0
+						bin_sizes[ibin] += new_bits_per_bin + extra
 			# create indexing map to move bits each iteration using fancy indexing
 			ind = []
 			offset = bin0_len
@@ -339,7 +351,7 @@ class Merge():
 			print("item_len=%s" % bin0_len)
 			print("bin_sizes=%s" % bin_sizes)
 			print("hist_bits=%s" % ind)
-			self.pvals["wx"].update( {"hist_bits": ind, "item_len":bin0_len} )
+			self.pvals["wx"].update( {"hist_bits": ind, "item_len":bin0_len, "bin_sizes":bin_sizes} )
 
 
 			# hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
@@ -570,7 +582,7 @@ def bina2str(address):
 	# convert binary array address to a string
 	binary_string = "".join(["%s" % i for i in address])
 	# following from: https://stackoverflow.com/questions/2072351/python-conversion-from-binary-string-to-hexadecimal
-	hex_string = '%0*X' % ((len(binary_string) + 3) // 4, int(binary_string, 2))
+	hex_string = '%0*x' % ((len(binary_string) + 3) // 4, int(binary_string, 2))
 	wlength = 8  # insert space between each 8 characters.  From: 
 	# https://stackoverflow.com/questions/10070434/how-do-i-insert-a-space-after-a-certain-amount-of-characters-in-a-string-using-p
 	# binary_string_with_spaces = ' '.join(binary_string[i:i+wlength] for i in range(0,len(binary_string),wlength))
@@ -667,9 +679,11 @@ def recall(prefix, env):
 	# build address to start searching
 	word_length = env.pvals["word_length"]
 	threshold = word_length * env.pvals["char_match_fraction"]
+	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
 	ma = env.pvals["merge_algorithm"]
 	if ma == "wx2":
 		wh_len = env.merge.pvals["wx"]["wh_len"]
+		item_len = env.merge.pvals["wx"]["item_len"]
 	debug = env.pvals["debug"]
 	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
 	address = env.merge.merge(b0, b0)
@@ -679,13 +693,29 @@ def recall(prefix, env):
 	found = [ prefix, ]
 	word2 = prefix
 	if ma  == "wx2":
-		if len(prefix) > 1 and debug:
-			print("prefix address used for searching:\n %s, match_bits=%s" % (bina2str(address), wh_len))
-			# recall starting xor part from memory using wl_half bits only (history part)
-			found_value = env.sdm.read(address,match_bits=wh_len)
-			print(" found_value = %s" % bina2str(found_value))
-			address = np.concatenate((address[0:wh_len], found_value[wh_len:]))
-			print(" created address used to start reading sequence:\n %s" % bina2str(address))
+		if len(prefix) > 1:
+			# iteratively read value at address until converges (no decrease in hamming distance between xor part in
+			# address and value read)
+			pb_len = sum(env.merge.pvals["wx"]["bin_sizes"][0:len(prefix)]) # number prefix bits
+			prev_address = address  # a large number so first found_value reduces hdiff
+			hconverge=[]
+			max_steps = 10
+			while True:
+				found_value = env.sdm.read(address)
+				address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+				hdiff = hamming(prev_address, address)
+				hconverge.append(hdiff)
+				if hdiff == 0 or len(hconverge) > max_steps:
+					break
+				prev_address = address
+			f_non_zero = np.count_nonzero(found_value) / len(found_value)
+			print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
+			if f_non_zero < 0.1:
+				print("Failed to converge to valid data (found_value near zero)")
+				return [found, word2]
+			if debug:
+				print(" found_value = %s" % bina2str(found_value))
+				print(" created address used to start reading sequence:\n %s" % bina2str(address))
 	computed_address = address
 	# now read sequence using address derived from prefix
 	ccount = 0
@@ -702,7 +732,7 @@ def recall(prefix, env):
 			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
 			# following to use computed_xor_part for all subsequent recall, ignoring what is in sdm for xor part
 			# computed_xor_part = xor_part
-			match_bits = wh_len
+			match_bits = item_len
 			# test replacing xor part of address with read xor part:
 			# address = np.concatenate((address[0:wh_len], recalled_xor_part))
 		else:
@@ -752,14 +782,15 @@ def recall(prefix, env):
 		computed_address = new_computed_address
 		word2 += found_char
 		ccount += 1
-		if ccount > 50:
+		if ccount > max_num_recalled_chars:
 			break
 	return [found, word2]
 
 def store_strings(env, strings):
 	ma = env.pvals["merge_algorithm"]
 	if ma == "wx2":
-		wh_len = env.merge.pvals["wx"]["wh_len"]
+		# wh_len = env.merge.pvals["wx"]["wh_len"]
+		item_len = env.merge.pvals["wx"]["item_len"]
 	debug = env.pvals["debug"] == 1
 	for string in strings:
 		print("storing '%s'" % string)
@@ -769,7 +800,7 @@ def store_strings(env, strings):
 			bchar = env.cmap.char2bin(char)
 			if ma == "wx2":
 				# store first part of character followed by xor part
-				value = np.concatenate((bchar[0:wh_len], address[wh_len:]))
+				value = np.concatenate((bchar[0:item_len], address[item_len:]))
 				assert len(value) == env.pvals["word_length"]
 				if debug:
 					print(" bchr:%s - %s" % (bina2str(bchar), char))
@@ -779,27 +810,51 @@ def store_strings(env, strings):
 			address = env.merge.merge(bchar, address)
 		env.record_saved_string(string)
 
-def store_strings_old(env, strings):
-	ma = env.pvals["merge_algorithm"]
-	wl_half = int(env.pvals["word_length"]/2)
-	start_bit = env.pvals["start_bit"]
-	debug = env.pvals["debug"] == 1
-	for string in strings:
-		print("storing '%s'" % string)
-		b0 = env.cmap.char2bin(string[0])  # binary word associated with first character
-		address = env.merge.merge(b0, b0)
-		for char in string[1:]+"#":  # add stop character at end
-			bchar = env.cmap.char2bin(char)
-			if ma == "wx2":
-				if debug:
-					print(" bchr:%s - %s" % (bina2str(bchar), char))
-				# store .5 bchar + end of address (xor part)
-				value = np.concatenate((bchar[0:wl_half], address[wl_half:]))
-			else:
-				value = bchar
-			env.sdm.store(address, value)
-			address = env.merge.merge(bchar, address)
-		env.record_saved_string(string)
+
+# def store_strings_old2(env, strings):
+# 	ma = env.pvals["merge_algorithm"]
+# 	if ma == "wx2":
+# 		wh_len = env.merge.pvals["wx"]["wh_len"]
+# 	debug = env.pvals["debug"] == 1
+# 	for string in strings:
+# 		print("storing '%s'" % string)
+# 		b0 = env.cmap.char2bin(string[0])  # binary word associated with first character
+# 		address = env.merge.merge(b0, b0)
+# 		for char in string[1:]+"#":  # add stop character at end
+# 			bchar = env.cmap.char2bin(char)
+# 			if ma == "wx2":
+# 				# store first part of character followed by xor part
+# 				value = np.concatenate((bchar[0:wh_len], address[wh_len:]))
+# 				assert len(value) == env.pvals["word_length"]
+# 				if debug:
+# 					print(" bchr:%s - %s" % (bina2str(bchar), char))
+# 			else:
+# 				value = bchar
+# 			env.sdm.store(address, value)
+# 			address = env.merge.merge(bchar, address)
+# 		env.record_saved_string(string)
+
+# def store_strings_old(env, strings):
+# 	ma = env.pvals["merge_algorithm"]
+# 	wl_half = int(env.pvals["word_length"]/2)
+# 	start_bit = env.pvals["start_bit"]
+# 	debug = env.pvals["debug"] == 1
+# 	for string in strings:
+# 		print("storing '%s'" % string)
+# 		b0 = env.cmap.char2bin(string[0])  # binary word associated with first character
+# 		address = env.merge.merge(b0, b0)
+# 		for char in string[1:]+"#":  # add stop character at end
+# 			bchar = env.cmap.char2bin(char)
+# 			if ma == "wx2":
+# 				if debug:
+# 					print(" bchr:%s - %s" % (bina2str(bchar), char))
+# 				# store .5 bchar + end of address (xor part)
+# 				value = np.concatenate((bchar[0:wl_half], address[wl_half:]))
+# 			else:
+# 				value = bchar
+# 			env.sdm.store(address, value)
+# 			address = env.merge.merge(bchar, address)
+# 		env.record_saved_string(string)
 
 
 def test_merge_convergence(env):
