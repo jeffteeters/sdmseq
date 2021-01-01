@@ -37,7 +37,8 @@ class Env:
 	 	{ "name":"xor_fraction", "kw":{"help":"Fraction of bits used for xor component in wx algorithm","type":float},
 	 	  "flag":"xf", "required_init":"m", "default":0.5},
 	 	{ "name":"first_bin_fraction", "kw":{"help":"First bin fraction, fraction of bits of item used for first bin "
-	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins","type":float}, "flag":"fbf",
+	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins OR an integer + 0.5 to store "
+	 	  "reverse character in value (wx2 algorithm)", "type":float}, "flag":"fbf",
 	 	  "required_init":"m", "default":8},
 	 	{ "name":"debug", "kw":{"help":"Debug mode","type":int, "choices":[0, 1]},
 		   "flag":"d", "required_init":"", "default":0},
@@ -83,6 +84,7 @@ class Env:
 		self.merge = Merge(self)
 		self.saved_strings = []
 		self.required_init = ""  # contains chars: 'i' - initialize structures, 'm' - clear memory, '' - none-needed
+		self.test_ma = wx3(self)
 
 	def record_saved_string(self, string):
 		self.saved_strings.append(string)
@@ -154,6 +156,7 @@ def do_interactive_commands(env):
 		" s <string> - store new string(s) OR param strings (if none specified)\n"
 		" r <prefix> - recall starting with prefix\n"
 		" r - recall param strings\n"
+		" v <prefix> - recall in reverse order\n"
 		" u - update parameters\n"
 		" c - clear memory\n"
 		" t - test merge convergence\n"
@@ -184,6 +187,9 @@ def do_interactive_commands(env):
 		if cmd == "r" and len(arg) > 0:
 			print("recall prefix %s" % arg)
 			recall_strings(env, shlex.split(arg), prefix_mode=True)
+		elif cmd == "v" and len(arg) > 0:
+			print("reverse recall prefix %s" % arg)
+			reverse_recall_strings(env, shlex.split(arg))
 		elif cmd == "r":
 			print("recall stored strings")
 			recall_param_strings(env)
@@ -263,6 +269,272 @@ def make_permutation_map(length):
 	# map each index to the next one in the shuffled list
 	map_index = [shuffled_indices[(i+1) % length] for i in range(length)]
 	return map_index
+
+class Merge_algorithm():
+	# Abstract class for algorithms used for creating address and data to store and recall sequences
+
+	def __init__(self,env):
+		self.env = env
+		self.name = type(self).__name__
+		self.pvals = {}
+		self.initialize()
+
+	def initialize(self):
+		print("function 'initialize' of merge_algorithm '%s' not implementd" % self.name)
+
+	def add(self, address, value, char):
+		# add character char to sequence
+		# address and value is current address and value at that address before adding char to sequence
+		# Returns (new_address, new_value) - new address and the value to store at that address
+		bchar1 = self.get_bchar1(value)
+		new_address = self.make_new_address(address, bchar1)
+		bchar2 = self.env.char2bin(char)
+		new_value = self.make_new_value(address, new_address, bchar2)
+		return (new_address, new_value)
+
+		print("function 'add' of merge_algorithm '%s' not implementd" % self.name)
+
+	def next(self, address, value):
+		# get next address and character in sequence
+		# given address and value at that address, return [new_address, char] character in sequence
+		print("function 'next' of merge_algorithm '%s' not implementd" % self.name)
+
+	def prev(self, address, value):
+		# get previous address and character in sequence (reverse recall)
+		# given address and value at that address, return [new_address, char] character in reverse sequence
+		print("function 'prev' of merge_algorithm '%s' not implementd" % self.name)
+
+
+class wx(Merge_algorithm):
+
+	def initialize(self):
+		# wx Weighted and/or XOR algorithm: created address as two parts: weighted history followed by xor
+		# number bits in xor part is xf*N (xf is xor_fraction)
+		# weighted history part formed by selecting (1-hf) N bits from item and hf*N bits from history.
+		# hf is fraction of history to store when forming new address
+		# this function builds the maps selecting bits for the history (not the xor component)
+		xf = self.env.pvals["xor_fraction"]
+		word_length = self.env.pvals["word_length"]
+		xr_len = int(word_length * xf)
+		wh_len = word_length - xr_len
+		char_match_threshold = word_length * self.env.pvals["char_match_fraction"]
+		self.pvals = {"wh_len":wh_len, "xr_len":xr_len, "char_match_threshold": char_match_threshold}
+		if self.name == "wx2" and (wh_len == 0 or xr_len == 0):
+			print("** Error in wx2 settings, wh_len (%s) and xr_len (%s) must both be > 0" % (wh_len, xr_len))
+		if wh_len > 0:
+			# compute weighted history component
+			# has two parts, new item bits, then history bits
+			# this code has a bug, may not work unless history_fraction == 0.5
+			fbf = self.env.pvals["first_bin_fraction"]  # fraction of wh_len used for first bin (bits from current item)
+			# include reverse character (for wx2 algorithm), indicated by fbf being integer>1 + .5
+			include_reverse_char = self.name == "wx2" and fbf > 1.0 and ((round(fbf * 10.0) % 10) == 5)
+			self.pvals.update( {"include_reverse_char": include_reverse_char} )
+			if fbf > 1.0:
+				# equal size bins
+				num_bins = int(fbf)
+				bits_per_bin = int(wh_len/num_bins)
+				remaining_bits = wh_len % num_bins
+				bin_sizes = [ bits_per_bin + (1 if i < remaining_bits else 0) for i in range(num_bins)]
+				bin0_len = bin_sizes[0]
+			else:
+				# bin sizes are specified by exponential decay (hf) of initial bin 
+				hf = self.env.pvals["history_fraction"]
+				bin_sizes = []
+				bin0_len = int(fbf * wh_len)
+				bits_left = wh_len - bin0_len
+				bin_sizes.append(bin0_len)
+				ibin = 0
+				min_bin_size = 4
+				while bits_left > min_bin_size:
+					next_bin_size = round(bin_sizes[ibin] * hf)
+					if next_bin_size  < min_bin_size:
+						next_bin_size = min(min_bin_size, bits_left)
+					bin_sizes.append(next_bin_size)
+					bits_left -= next_bin_size
+					ibin += 1
+				if bits_left > 0:
+					# distribute remaining bits in previous bins
+					# from: https://stackoverflow.com/questions/21713631/distribute-items-in-buckets-equally-best-effort
+					new_bits_per_bin = int(bits_left / (len(bin_sizes) - 1))
+					remaining_bits = bits_left % (len(bin_sizes) - 1)
+					for ibin in range(1, len(bin_sizes)):
+						extra = 1 if ibin <= remaining_bits else 0
+						bin_sizes[ibin] += new_bits_per_bin + extra
+			# create indexing map to move bits each iteration using fancy indexing
+			ind = []
+			offset = 0
+			for i in range(1,len(bin_sizes)):
+				bin_size = bin_sizes[i]
+				for j in range(bin_size):
+					ind.append(j+offset)
+				offset += bin_sizes[i-1]
+			assert len(ind) + bin0_len + xr_len == word_length, ("wx hist init mismatch, ind=%s, bin0_len=%s, xr_len=%s" %
+				(ind, bin0_len, xr_len))
+			print("wx2 init:")
+			print("item_len=%s" % bin0_len)
+			print("bin_sizes=%s" % bin_sizes)
+			print("hist_bits=%s" % ind)
+			self.pvals.update( {"hist_bits": ind, "item_len":bin0_len, "bin_sizes":bin_sizes})
+			if include_reverse_char:
+				# used for wx2 if allow reverse recall
+				last_char_position = sum(bin_sizes[0:-1])  # position of reverse character
+				len_item_part = round(bin0_len / 2.0)
+				len_reverse_part = bin0_len - len_item_part
+				self.pvals.update( {"last_char_position":last_char_position, "len_item_part":len_item_part,
+					"len_reverse_part":len_reverse_part} )
+
+	def add(self, address, value, char):
+		# add character char to sequence
+		# address and value is current address and value at that address before adding char to sequence
+		# Returns (new_address, new_value) - new address and the value to store at that address
+		# Fields in address are:
+		#  <history_part> <xor_part>
+		#  <history_part> of address is:
+		#     <item_t> <item_t-1> <item_t-2> ... <item_t-n+1>    (assuming n bins)
+		# Fields in value for wx2 class are:
+		#     <item_t+1> [<item_t-n>] <item_t-1> <item_t-2> ... <item_t-n+1>  <xor_part> (aligns with address)
+		#  OR, for wx class, simply, <item_t+1>  (no <xor part>)
+		# If <item_t-n> is present, size of <item_t+1> and <item_t-n> are reduced by half to allow alignment with address
+		# Generated new_address has fields:
+		#    <item_t+1> <item_t> <item_t-1> ... <item_t-n>  <new xor_part>
+		#       (It's made by shifting history_part in previous address right, inserting item from value)
+		# Generated new_value has fields:
+		#  <char> [<item_t-n+1>] <item_t> <item_t-1> ... <item_t-n> <new xor_part>
+		# where:
+		#  <char> is bits for input char (<item_t+2>)
+		#  <new xor_part> formed by shifting <xor_part> right, xor with <item_t+1> (item in input value)
+		assert self.name in ("wx", "wx2")
+		item_tp2 = self.env.cmap.char2bin(char)
+		# get bits for <item_t+1> from value
+		if self.name == "wx2":
+			item_tp1_len = self.pvals["len_item_part"] if self.pvals["include_reverse_char"] else self.pvals["item_len"]
+			item_tp1 = self.env.cmap.part2full(value[0:item_tp1_len])
+		else:
+			item_tp1 = value
+		# form address as two components.  First (1-xf*N) bits are weighted history. Remaining bits (xf*N)are permuted XOR.
+		if(self.pvals["wh_len"] > 0):
+			# select bits specified by hist_bits and first part of item
+			hist_part = np.concatenate((item_tp1[0:self.pvals["item_len"]], address[self.pvals["hist_bits"]]))
+			if self.pvals["xr_len"] == 0:
+				# no xor component
+				assert len(hist_part) == self.env.pvals["word_length"], ("wx algorithm, no xor part, but len(hist_part) %s"
+					" does not match word_length (%s)" % (len(hist_part), self.env.pvals["word_length"]))
+				return (hist_part, item_tp2)
+		# compute XOR part.  Is permute ( xor component from address) XOR leading bits from <item_t+1>.
+		# if wh_len is zero then is pure XOR algorithm
+		addr_input = address[self.pvals["wh_len"]:]
+		item_input = item_tp1[0:self.pvals["xr_len"]]
+		assert len(addr_input) == len(item_input)
+		xor_part = np.bitwise_xor(np.roll(addr_input, 1), item_input)
+		new_address = np.concatenate((hist_part, xor_part)) if self.pvals["wh_len"] > 0 else xor_part
+		assert len(new_address) == self.env.pvals["word_length"], "wx algorithm, len(new_address) (%s) != word_length (%s)" % (
+			len(new_address), self.env.pvals["word_length"])
+		# now get new_value
+		if self.name == "wx2":
+			if self.pvals["include_reverse_char"]:
+				item_input = np.concatenate((item_tp2[0:self.pvals["len_item_part"]], 
+					address[self.pvals["last_char_position"]:self.pvals["wh_len"]]))
+				assert len(item_input) == self.pvals["item_len"]
+			else:
+				item_input = item_tp2[0:self.pvals["item_len"]]
+			new_value = np.concatenate((item_input, new_address[self.pvals["item_len"]:]))
+		else:
+			new_value = item_tp2
+		assert len(new_value) == env.pvals["word_length"]
+		return (new_address, new_value)
+		# if debug:
+		# 	print(" bchr:%s - %s" % (bina2str(bchar), char))
+
+	def get_bchar1(self, value):
+		# get bits for <item_t+1> from value
+		assert self.name in ("wx", "wx2")
+		if self.name == "wx2":
+			item_tp1_len = self.pvals["len_item_part"] if self.pvals["include_reverse_char"] else self.pvals["item_len"]
+			item_tp1 = self.env.cmap.part2full(value[0:item_tp1_len])
+		else:
+			item_tp1 = value
+		return item_tp1
+
+	def make_new_address(self, address, bchar1):
+		# form address as two components.  First (1-xf*N) bits are weighted history. Remaining bits (xf*N)are permuted XOR.
+		if(self.pvals["wh_len"] > 0):
+			# select bits specified by hist_bits and first part of item
+			hist_part = np.concatenate((bchar1[0:self.pvals["item_len"]], address[self.pvals["hist_bits"]]))
+			if self.pvals["xr_len"] == 0:
+				# no xor component
+				assert len(hist_part) == self.env.pvals["word_length"], ("wx algorithm, no xor part, but len(hist_part) %s"
+					" does not match word_length (%s)" % (len(hist_part), self.env.pvals["word_length"]))
+				return hist_part
+		# compute XOR part.  Is permute ( xor component from address) XOR leading bits from <item_t+1>.
+		# if wh_len is zero then is pure XOR algorithm
+		addr_input = address[self.pvals["wh_len"]:]
+		item_input = bchar1[0:self.pvals["xr_len"]]
+		assert len(addr_input) == len(item_input)
+		xor_part = np.bitwise_xor(np.roll(addr_input, 1), item_input)
+		new_address = np.concatenate((hist_part, xor_part)) if self.pvals["wh_len"] > 0 else xor_part
+		assert len(new_address) == self.env.pvals["word_length"], "wx algorithm, len(new_address) (%s) != word_length (%s)" % (
+			len(new_address), self.env.pvals["word_length"])
+		return new_address
+
+	def make_new_value(address, new_address, bchar2):
+		if self.name == "wx2":
+			if self.pvals["include_reverse_char"]:
+				item_input = np.concatenate((bchar2[0:self.pvals["len_item_part"]], 
+					address[self.pvals["last_char_position"]:self.pvals["wh_len"]]))
+				assert len(item_input) == self.pvals["item_len"]
+			else:
+				item_input = bchar2[0:self.pvals["item_len"]]
+			new_value = np.concatenate((item_input, new_address[self.pvals["item_len"]:]))
+		else:
+			new_value = bchar2
+		assert len(new_value) == env.pvals["word_length"]
+		return new_value
+
+
+	def next(self, address, value):
+		# get next address and character in sequence
+		# given address and value at that address, return [new_address, char, top_matches]
+		# where new_address is the next address and char is the character at the passed in address and value
+		# top matches are a list of the three top matching characters
+		top_matches = self.env.cmap.bin2char(value)
+		char = top_matches[0][0]
+		if char == "#" or top_matches[0][1] > self.pvals["char_match_threshold"]
+			# found stop char, or hamming distance to top match is over threshold
+			new_address = None
+		else:
+			[new_address, value] = self.add(char, address)
+		return [new_address, char, top_matches]
+
+class wx2(wx):
+	# similar to wx, except data value includes xor part
+
+class fl(Merge_algorithm):
+
+	def initialize(self):
+		# From Pentti: The first aN bits should be copied from the first aN bits of
+		# the present vector, and the last bN bits should be copied
+		# from the LAST bN bits of the permuted history vector.
+		hf = self.env.pvals["history_fraction"] # Fraction of history to store when forming new address
+		hist_len = int(hf * self.env.pvals["word_length"])
+		assert hist_len > 0, "fl algorithm: must have hist_len(%s) > 0, hf (%s) is too small" % (hist_len, hf)
+		item_len = self.env.pvals["word_length"] - hist_len
+		assert item_len > 0, "fl algorithm: item_len must be > 0, is %s" % item_len
+		self.pvals["fl"] = {"hist_len":hist_len, "item_len":item_len}
+		self.pvals["shuffle_map"] = make_permutation_map(self.env.pvals["word_length"])
+
+	def add(self, address, value, char):
+	merge_fl(self, item, history):
+		part_1 = item[0:self.pvals["fl"]["item_len"]]
+		# np.random.RandomState(seed=42).permutation(history)
+		# routine "np.random.RandomState(seed=42).permutation(history)" skips some elements, can't use following
+		# part_2 = np.random.RandomState(seed=42).permutation(history)[-self.pvals["fl"]["hist_len"]:]
+		part_2 = history[self.pvals["shuffle_map"]][-self.pvals["fl"]["hist_len"]:]
+		address = np.concatenate((part_1, part_2))
+		assert len(address) == self.env.pvals["word_length"], "fl algorithm, len(address) (%s) != word_length (%s)" % (
+			len(address), self.env.pvals["word_length"])
+		return address
+
+
 
 class Merge():
 	# functions for different types of merges (combining history and new vector)
@@ -539,6 +811,15 @@ class Char_map:
 		top_matches = [ (self.chars[x[0]], x[1]) for x in top_matches ]
 		return top_matches
 
+	def part2full(self, b, match_bits=None):
+		# return full length binary array corresponding to first b bits of b.  match_bits is number
+		# of bits in b to use for matching.
+		char = self.bin2char(b, nret = 1, match_bits=match_bits)[0][0]
+		full = self.char2bin(char)
+		return full
+
+
+
 
 class Sdm:
 	# implements a sparse distributed memory
@@ -602,77 +883,7 @@ def hamming(b1, b2):
 	ndiff = np.count_nonzero(b1!=b2)
 	return ndiff
 
-# def recall_old(prefix, env):
-# 	# recall sequence starting with prefix
-# 	# build address to start searching
-# 	word_length = env.pvals["word_length"]
-# 	wl_half = int(word_length / 2)
-# 	threshold = word_length * env.pvals["char_match_fraction"]
-# 	ma = env.pvals["merge_algorithm"]
-# 	debug = env.pvals["debug"]
-# 	# start_bit = env.pvals["start_bit"]
-# 	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
-# 	address = env.merge.merge(b0, b0)
-# 	for char in prefix[1:]:
-# 		b = env.cmap.char2bin(char)
-# 		address = env.merge.merge(b, address)
-# 	found = [ prefix, ]
-# 	word2 = prefix
-# 	if ma  == "wx2":
-# 		if len(prefix) > 1:
-# 			# find starting xor part by searching using wl_half bits only (history part)
-# 			found_addr = env.sdm.read(address,match_bits=wl_half)
-# 			address = np.concatenate((address[0:wl_half], found_addr[wl_half:]))
-# 		computed_address = address
-# 	# now read sequence using prefix address
-# 	ccount = 0
-# 	while True:
-# 		b = env.sdm.read(address)
-# 		if ma == "wx2":
-# 			bchar = np.concatenate((b[0:wl_half], b[0:wl_half]))
-# 			xor_part = b[wl_half:]
-# 			computed_xor_part = computed_address[wl_half:]
-# 			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, xor_part)
-# 			# following to use computed_xor_part for all subsequent recall, ignoring what is in sdm for xor part
-# 			computed_xor_part = xor_part
-# 		else:
-# 			bchar = b
-# 			xor_hamming = None
-# 		top_matches = env.cmap.bin2char(bchar)
-# 		found.append(top_matches)
-# 		found_char = top_matches[0][0]
-# 		if found_char == "#":
-# 			# found stop char
-# 			break
-# 		# perform "cleanup" by getting b corresponding to top match 
-# 		if top_matches[0][1] > 0:
-# 			# was not an exact match.  Check to see if hamming distance larger than threshold
-# 			if top_matches[0][1] > threshold:
-# 				break
-# 			# Cleanup by getting b corresponding to top match
-# 			bchar = env.cmap.char2bin(found_char)
-# 		if ma == "wx2":
-# 			history = np.concatenate((address[0:wl_half], xor_part))
-# 			if debug:
-# 				print("computing address")
-# 			computed_address = env.merge.merge(bchar, computed_address)
-# 		else:
-# 			history = address
-# 		new_address = env.merge.merge(bchar, history)
-# 		diff = np.count_nonzero(history!=new_address)
-# 		found[-1].append("addr_diff=%s" % diff)
-# 		if xor_hamming:
-# 			found[-1].append(xor_hamming)
-# 		if diff == 0:
-# 			found[-1].append("found fixed point in address")
-# 			    #, address=\n%s" % (bina2str(new_address)))
-# 			break
-# 		address = new_address
-# 		word2 += found_char
-# 		ccount += 1
-# 		if ccount > 50:
-# 			break
-# 	return [found, word2]
+
 
 def recall(prefix, env):
 	# recall sequence starting with prefix
@@ -879,6 +1090,139 @@ def test_merge_convergence(env):
 def store_param_strings(env):
 	# store strings provided as parameters in command line (or updated)
 	store_strings(env, env.pvals["string_to_store"])
+
+def reverse_recall(suffix, env):
+	# recall string in reverse starting with suffix, works only with wx2 method
+	found = [ prefix, ]
+	word2 = prefix
+	ma = env.pvals["merge_algorithm"]
+	if ma != "wx2":
+		print("Reverse recall only works with 'wx2' algorithm")
+		return [found, word2]
+	# build address to start searching
+	wh_len = env.merge.pvals["wx"]["wh_len"]
+	item_len = env.merge.pvals["wx"]["item_len"]
+	word_length = env.pvals["word_length"]
+	threshold = word_length * env.pvals["char_match_fraction"]
+	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
+	ma = env.pvals["merge_algorithm"]
+	debug = env.pvals["debug"]
+	b0 = env.cmap.char2bin(prefix[0])  # binary word associated with first character
+	address = env.merge.merge(b0, b0)
+	for char in prefix[1:]:
+		b = env.cmap.char2bin(char)
+		address = env.merge.merge(b, address)
+	if ma  == "wx2":
+		if len(suffix) > 1:
+			# iteratively read value at address until converges (no decrease in hamming distance between xor part in
+			# address and value read)
+			pb_len = sum(env.merge.pvals["wx"]["bin_sizes"][0:len(prefix)]) # number prefix bits
+			prev_address = address  # a large number so first found_value reduces hdiff
+			hconverge=[]
+			max_steps = 10
+			while True:
+				found_value = env.sdm.read(address)
+				address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+				hdiff = hamming(prev_address, address)
+				hconverge.append(hdiff)
+				if hdiff == 0 or len(hconverge) > max_steps:
+					break
+				prev_address = address
+			f_non_zero = np.count_nonzero(found_value) / len(found_value)
+			print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
+			if f_non_zero < 0.1:
+				print("Failed to converge to valid data (found_value near zero)")
+				return [found, word2]
+			if debug:
+				print(" found_value = %s" % bina2str(found_value))
+				print(" created address used to start reading sequence:\n %s" % bina2str(address))
+	computed_address = address
+	# now read sequence in reverse order using address derived from prefix
+	ccount = 0
+	while True:
+		b = env.sdm.read(address)
+		recalled_xor_part = b[wh_len:]
+		# get previous character from item in address
+		top_matches = env.cmap.bin2char(address, match_bits=item_len)
+		found.append(top_matches)
+		found_char = top_matches[0][0]
+		bchar = env.cmap.char2bin(found_char)
+		# new_address = 
+
+		if ma == "wx2":
+			if debug:
+				print(" reading, addr=%s, result b=%s" % (bina2str(address), bina2str(b)))
+			# value read (b) has char part followed by xor part
+			# bchar = np.concatenate((b[0:wl_half], b[0:wl_half]))
+			recalled_xor_part = b[wh_len:]
+			# computed_xor_part = computed_address[wh_len:]
+			computed_xor_part = computed_address[wh_len:]
+			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
+			# following to use computed_xor_part for all subsequent recall, ignoring what is in sdm for xor part
+			# computed_xor_part = xor_part
+			match_bits = item_len
+			# test replacing xor part of address with read xor part:
+			# address = np.concatenate((address[0:wh_len], recalled_xor_part))
+		else:
+			# bchar = b
+			xor_hamming = None
+			match_bits = None
+		top_matches = env.cmap.bin2char(b, match_bits=match_bits)
+		found.append(top_matches)
+		found_char = top_matches[0][0]
+		if found_char == "#" or top_matches[0][1] > threshold:
+			# found stop char, or hamming distance to top match is over threshold
+			break
+		# get full binary word corresponding to character
+		if top_matches[0][1] > 0 or match_bits is not None:
+			bchar = env.cmap.char2bin(found_char)
+		else:
+			bchar = b
+		# at this point, have:
+		#  address - address of value just read from memory
+		#  b - value read using "address"
+		#  found_char - found character (printable code) derived from b
+		#  bchar - binary word corresponding to found_char
+		# wx2 method only:
+		#  recalled_xor_part - xor part read from memory (from b)
+		#  computed_xor_part - xor part computed at each iteration using previous address and bchar
+		# Now need to build the new address
+		# create history to use in merge to create new address for reading next character in the sequence
+		# if ma == "wx2":
+		# 	# substitute computed 
+		# 	history = np.concatenate((address[0:wh_len], computed_xor_part))
+		# 	# if debug:
+		# 	# 	print("computing address")
+		# 	# computed_address = env.merge.merge(bchar, computed_address)
+		# else:
+		# 	history = address
+		new_computed_address = env.merge.merge(bchar, computed_address)
+		new_address = env.merge.merge(bchar, address)
+		diff = np.count_nonzero(address!=new_address)
+		found[-1].append("addr_diff=%s" % diff)
+		if xor_hamming:
+			found[-1].append(xor_hamming)
+		if diff == 0:
+			found[-1].append("found fixed point in address")
+			    #, address=\n%s" % (bina2str(new_address)))
+			break
+		address = new_address
+		computed_address = new_computed_address
+		word2 += found_char
+		ccount += 1
+		if ccount > max_num_recalled_chars:
+			break
+	return [found, word2]
+
+
+def reverse_recall_strings(env, strings):
+	# recall in reverse each string in strings
+	for suffix in strings:
+		found, word2 = reverse_recall(suffix, env)
+		pp.pprint(found)
+		print ("Reverse recall '%s'" % suffix)
+		print("found: '%s'" % word2)
+
 
 def recall_strings(env, strings, prefix_mode = False):
 	# recall list of strings starting with first character of each
