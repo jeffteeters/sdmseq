@@ -75,16 +75,18 @@ class Env:
 	def initialize(self):
 		# initialize sdm, char_map and merge
 		word_length = self.pvals["word_length"]
-		# repeat = self.pvals["merge_algorithm"] == "wx2"  # if wx2 algorithm, have first half of item words match second half
-		repeat = False
+		debug = self.pvals["debug"]
 		print("Initializing.")
-		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length, repeat=repeat)
+		self.cmap = Char_map(self.pvals["string_to_store"], word_length=word_length, debug=debug)
 		self.sdm = Sdm(address_length=word_length, word_length=word_length, num_rows=self.pvals["num_rows"],
 			nact = self.pvals["activation_count"], debug=self.pvals["debug"])
-		self.ma = getattr(sys.modules[__name__], "Ma_" + self.pvals["merge_algorithm"])(self)
+		self.initialize_merge_algorithm()
 		# self.merge = Merge(self)
 		self.saved_strings = []
 		self.required_init = ""  # contains chars: 'i' - initialize structures, 'm' - clear memory, '' - none-needed
+
+	def initialize_merge_algorithm(self):
+		self.ma = getattr(sys.modules[__name__], "Ma_" + self.pvals["merge_algorithm"])(self)
 
 	def record_saved_string(self, string):
 		self.saved_strings.append(string)
@@ -95,7 +97,6 @@ class Env:
 			self.initialize()
 		elif "m" in self.required_init:
 			self.clear()
-			self.merge.initialize()
 		else:
 			assert self.required_init == "", "invalid char in required_init: %s" % self.required_init
 
@@ -107,7 +108,7 @@ class Env:
 		else:
 			print("Clearing memory.")
 			self.sdm.clear()
-			self.merge
+			self.initialize_merge_algorithm()
 			self.saved_strings = []
 			self.required_init = ""
 
@@ -224,20 +225,23 @@ def find_matches(m, b, nret, index_only = False, match_bits=None):
 	assert len(m.shape) == 2, "array to match must be 2-d"
 	# assert m.shape[1] == len(b), "array element size does not match size of match binary value"
 	if match_bits is None:
+		assert len(b) == m.shape[1], "match_bits is None but len(b) (%s) not equal to m.shape[1] (%s)" % (
+			len(b), m.shape[1])
 		match_bits = len(b)
 	assert match_bits <= len(b), "match_bits for find_matchs too long (%s), must be less than (%s)" % (match_bits, len(b))
 	matches = []
 	for i in range(m.shape[0]):
 		ndiff = np.count_nonzero(m[i][0:match_bits]!=b[0:match_bits])
 		matches.append( (i, ndiff) )
-	matches.sort(key=itemgetter(1))
+	# matches.sort(key=itemgetter(1))
+	matches.sort(key = lambda y: (y[1], y[0]))
 	# if ties in hamming distance, make sure the first rows (lowest index number) are selected
-	hamming = matches[nret-1][1]
-	nh = 1
-	while matches[nret-1+nh][1] == hamming:
-		if matches[nret-2+nh][0] > matches[nret-1+nh][0]:
-			sys.exit("found matches with index out of order")
-		nh += 1
+	# hamming = matches[nret-1][1]
+	# nh = 1
+	# while matches[nret-1+nh][1] == hamming:
+	# 	if matches[nret-2+nh][0] > matches[nret-1+nh][0]:
+	# 		sys.exit("found matches with index out of order")
+	# 	nh += 1
 	# if nh > 1:
 	# 	print("Found %s  match last hamming: %s" % (nh, matches[nret-1:nret-1+nh]))
 	top_matches = matches[0:nret]
@@ -245,13 +249,13 @@ def find_matches(m, b, nret, index_only = False, match_bits=None):
 		top_matches = [x[0] for x in top_matches]
 	return top_matches
 
-def initialize_binary_matrix(nrows, ncols, repeat=False):
+def initialize_binary_matrix(nrows, ncols):
 	# create binary matrix with each row having binary random number
 	assert ncols % 2 == 0, "ncols must be even"
 	bm = np.random.randint(2, size=(nrows, ncols), dtype=np.int8)
-	if repeat:
-		# make second half of each word same as first half.  Used in wx2 method.
-		bm[:,int(ncols/2):] = bm[:,0:int(ncols/2)]
+	# if repeat:
+	# 	# make second half of each word same as first half.  Used in wx2 method.
+	# 	bm[:,int(ncols/2):] = bm[:,0:int(ncols/2)]
 	# if wanted same number of zeros and ones, code below could be used.
 	# hw = ncols / 2
 	# bm = np.zeros( (nrows, ncols), dtype=dtype=np.int8) # bm - binary_matrix
@@ -282,16 +286,21 @@ class Merge_algorithm():
 		self.pvals = {}
 		self.initialize()
 
+	def make_initial_address(self, char):
+		# returns (address, value) corresponding to starting character char
+		bchar = self.env.cmap.char2bin(char)
+		return (bchar, bchar)
+
 	def add(self, address, value, char):
 		# add character char to sequence
 		# address and value is current address and value at that address before adding char to sequence
 		# Returns (new_address, new_value) - new address and the value to store at that address
 		bchar2 = self.env.cmap.char2bin(char)
-		if address is None:
-			# if this is the start of the sequence, use binary for char for both address and value
-			assert value is None
-			address = bchar2
-			value = bchar2
+		# if address is None:
+		# 	# if this is the start of the sequence, use binary for char for both address and value
+		# 	assert value is None
+		# 	address = bchar2
+		# 	value = bchar2
 		bchar1 = self.get_bchar1(value)
 		new_address = self.make_new_address(address, bchar1)
 		new_value = self.make_new_value(address, new_address, bchar2)
@@ -301,7 +310,7 @@ class Merge_algorithm():
 		# get next address and character in sequence
 		# given address and value at that address, return [new_address, char, top_matches] character in sequence
 		bchar1_part = self.get_bchar1_part(value)
-		top_matches = self.env.cmap.bin2char(bchar1_part)
+		top_matches = self.env.cmap.bin2char(bchar1_part, match_bits=len(bchar1_part))
 		char = top_matches[0][0]
 		if char == "#" or top_matches[0][1] > self.pvals["char_match_threshold"]:
 			# found stop char, or hamming distance to top match is over threshold
@@ -554,7 +563,8 @@ class Ma_wx2(Ma_wx):
 
 	def get_bchar1(self, value):
 		bchar1_part = self.get_bchar1_part(value)
-		bchar1 = self.env.cmap.part2full(bchar1_part)
+		match_bits = len(bchar1_part)
+		bchar1 = self.env.cmap.part2full(bchar1_part, match_bits = match_bits)
 		return bchar1
 
 	def make_new_value(self, address, new_address, bchar2):
@@ -898,7 +908,7 @@ class Char_map:
 	# below specifies maximum number of unique characters
 	max_unique_chars = 50
 
-	def __init__(self, seq, word_length = 128, repeat=False):
+	def __init__(self, seq, word_length = 128, debug=False):
 		# seq - a Sequence object
 		# word_length - number of bits in random binary word
 		# repeat - make second half of each word same as first half (used for wx2)
@@ -907,8 +917,14 @@ class Char_map:
 		self.chars = ''.join(sorted(list(set(list(''.join(seq))))))  # sorted string of characters appearing in seq
 		self.chars += "#"  # stop char - used to indicate end of sequence
 		self.check_length()
-		self.repeat = True
-		self.binary_vals = initialize_binary_matrix(self.max_unique_chars, word_length, repeat)
+		self.debug = debug
+		self.binary_vals = initialize_binary_matrix(self.max_unique_chars, word_length)
+		if debug:
+			self.show_codes()
+
+	def show_codes(self):
+		for i in range(len(self.chars)):
+			print("char '%s' is %s " % (self.chars[i], bina2str(self.binary_vals[i])))
 	
 	def check_length(self):
 		# make sure not too many unique characters 
@@ -924,6 +940,8 @@ class Char_map:
 			index = len(self.chars)
 			self.chars += char
 			self.check_length()
+			if self.debug:
+				print("char '%s' is %s " % (char, bina2str(self.binary_vals[index])))
 		return self.binary_vals[index]
 
 	def bin2char(self, b, nret = 3, match_bits=None):
@@ -983,6 +1001,8 @@ class Sdm:
 
 def bina2str(address):
 	# convert binary array address to a string
+	if address is None:
+		return None
 	binary_string = "".join(["%s" % i for i in address])
 	# following from: https://stackoverflow.com/questions/2072351/python-conversion-from-binary-string-to-hexadecimal
 	hex_string = '%0*x' % ((len(binary_string) + 3) // 4, int(binary_string, 2))
@@ -1017,60 +1037,66 @@ def recall(prefix, env):
 		wh_len = env.ma.pvals["wh_len"]
 		item_len = env.ma.pvals["item_len"]
 	debug = env.pvals["debug"]
-	address = None
-	value = None
-	for char in prefix:
+	address, value = env.ma.make_initial_address(prefix[0])
+	for char in prefix[1:]+"#":  # append '#' so make address corresponding to char to retrieve, ignore last value
+		paddress, pvalue = [address, value]
 		address, value = env.ma.add(address, value, char)
-	found = [ prefix[0:-1], ]
-	word2 = prefix[0:-1]
-	if ma  == "wx2":
-		if len(prefix) > 1:
-			# iteratively read value at address until converges (no decrease in hamming distance between xor part in
-			# address and value read)
-			pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
+		if env.pvals["debug"]:
+			print("recall, char='%s', address=%s, value=%s" % (char, bina2str(address), bina2str(value)))
+	found = [ prefix, ]
+	word2 = prefix
+	if ma  == "wx2" and len(prefix) > 1:
+		# iteratively read value at address until converges (no decrease in hamming distance between xor part in
+		# address and value read)
+		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
+		prev_address = address
+		hconverge=[]
+		max_steps = 10
+		while True:
+			found_value = env.sdm.read(address)
+			address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+			hdiff = hamming(prev_address, address)
+			hconverge.append(hdiff)
+			if hdiff == 0 or len(hconverge) > max_steps:
+				break
 			prev_address = address
-			hconverge=[]
-			max_steps = 10
-			while True:
-				found_value = env.sdm.read(address)
-				address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
-				hdiff = hamming(prev_address, address)
-				hconverge.append(hdiff)
-				if hdiff == 0 or len(hconverge) > max_steps:
-					break
-				prev_address = address
-			f_non_zero = np.count_nonzero(found_value) / len(found_value)
-			print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
-			if f_non_zero < 0.1:
-				print("Failed to converge to valid data (found_value near zero)")
-				return [found, word2]
-			if debug:
-				print(" found_value = %s" % bina2str(found_value))
-				print(" created address used to start reading sequence:\n %s" % bina2str(address))
-	computed_address = address
-	computed_value = value
+		f_non_zero = np.count_nonzero(found_value) / len(found_value)
+		print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
+		if f_non_zero < 0.1:
+			print("Failed to converge to valid data (found_value near zero)")
+			return [found, word2]
+		if debug:
+			print(" found_value = %s" % bina2str(found_value))
+			print(" created address used to start reading sequence:\n %s" % bina2str(address))
+		computed_address = address
+		computed_value = found_value			
+	else:
+		computed_address = paddress
+		computed_value = pvalue
 	# now read sequence using address derived from prefix
 	ccount = 0
 	while True:
 		value = env.sdm.read(address)
-		if ma == "wx2":
+		new_address, found_char, top_matches = env.ma.next(address, value)
+		found.append(top_matches)
+		new_computed_address, new_computed_value = env.ma.add(computed_address, computed_value, found_char)
+		if ma == "wx2" and not (len(prefix) > 1 and new_address is None):
 			if debug:
-				print(" reading, addr=%s, value=%s" % (bina2str(address), bina2str(value)))
+				print("read ---  addr=%s, value=%s" % (bina2str(address), bina2str(value)))
+				print(" computed  add=%s, value=%s" % (bina2str(computed_address), bina2str(computed_value)))
+				print("    new   addr=%s, found_char=%s" % (bina2str(new_address), found_char))
+				print(" new_computed,=%s, value=%s" % (bina2str(new_computed_address), bina2str(new_computed_value)))
 			# value read (b) has char part followed by xor part
-			recalled_xor_part = value[wh_len:]
-			computed_xor_part = computed_address[wh_len:]
+			recalled_xor_part = value[wh_len:] if len(prefix) == 1 else new_address[wh_len:]
+			computed_xor_part = new_computed_address[wh_len:]
 			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
 			# following to use computed_xor_part for all subsequent recall, ignoring what is in sdm for xor part
 			# computed_xor_part = xor_part
-			match_bits = item_len
 			# test replacing xor part of address with read xor part:
 			# address = np.concatenate((address[0:wh_len], recalled_xor_part))
 		else:
 			# bchar = b
 			xor_hamming = None
-			match_bits = None
-		new_address, found_char, top_matches = env.ma.next(address, value)
-		found.append(top_matches)
 		if new_address is None:
 			# found stop char, or hamming distance to top match is over threshold
 			break
@@ -1080,7 +1106,6 @@ def recall(prefix, env):
 		# wx2 method only:
 		#  recalled_xor_part - xor part read from memory (from b)
 		#  computed_xor_part - xor part computed at each iteration using previous address and value
-		new_computed_address, new_computed_value = env.ma.add(computed_address, computed_value, found_char)
 		diff = np.count_nonzero(address!=new_address)
 		found[-1].append("addr_diff=%s" % diff)
 		if xor_hamming:
@@ -1091,6 +1116,7 @@ def recall(prefix, env):
 			break
 		address = new_address
 		computed_address = new_computed_address
+		computed_value = new_computed_value
 		word2 += found_char
 		ccount += 1
 		if ccount > max_num_recalled_chars:
@@ -1214,9 +1240,8 @@ def store_strings(env, strings):
 	# debug = env.pvals["debug"] == 1
 	for string in strings:
 		print("storing '%s'" % string)
-		address = None
-		value = None
-		for char in string+"#":  # add stop character at end
+		address, value = env.ma.make_initial_address(string[0])
+		for char in string[1:]+"#":  # add stop character at end
 			address, value = env.ma.add(address, value, char)
 			env.sdm.store(address, value)
 		env.record_saved_string(string)
