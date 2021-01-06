@@ -8,6 +8,7 @@ import shlex
 import readline
 readline.parse_and_bind('tab: complete')
 import sys
+from random import randint
 
 
 class Env:
@@ -289,18 +290,14 @@ class Merge_algorithm():
 	def make_initial_address(self, char):
 		# returns (address, value) corresponding to starting character char
 		bchar = self.env.cmap.char2bin(char)
-		return (bchar, bchar)
+		return (bchar, bchar)	
+
 
 	def add(self, address, value, char):
 		# add character char to sequence
 		# address and value is current address and value at that address before adding char to sequence
 		# Returns (new_address, new_value) - new address and the value to store at that address
 		bchar2 = self.env.cmap.char2bin(char)
-		# if address is None:
-		# 	# if this is the start of the sequence, use binary for char for both address and value
-		# 	assert value is None
-		# 	address = bchar2
-		# 	value = bchar2
 		bchar1 = self.get_bchar1(value)
 		new_address = self.make_new_address(address, bchar1)
 		new_value = self.make_new_value(address, new_address, bchar2)
@@ -1030,24 +1027,22 @@ def recall(prefix, env):
 	# recall sequence starting with prefix
 	# build address to start searching
 	word_length = env.pvals["word_length"]
-	# threshold = word_length * env.pvals["char_match_fraction"]
 	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
 	ma = env.pvals["merge_algorithm"]
 	if ma == "wx2":
 		wh_len = env.ma.pvals["wh_len"]
 		item_len = env.ma.pvals["item_len"]
 	debug = env.pvals["debug"]
-	address, value = env.ma.make_initial_address(prefix[0])
-	for char in prefix[1:]+"#":  # append '#' so make address corresponding to char to retrieve, ignore last value
-		paddress, pvalue = [address, value]
-		address, value = env.ma.add(address, value, char)
-		if env.pvals["debug"]:
-			print("recall, char='%s', address=%s, value=%s" % (char, bina2str(address), bina2str(value)))
+	# address, value = env.ma.make_initial_address(prefix[0])
+	# create initial address from prefix
+	address = env.cmap.char2bin(prefix[0])
+	for char in prefix:
+		address = env.ma.make_new_address(address, env.cmap.char2bin(char))
 	found = [ prefix, ]
 	word2 = prefix
 	if ma  == "wx2" and len(prefix) > 1:
 		# iteratively read value at address until converges (no decrease in hamming distance between xor part in
-		# address and value read)
+		# address and prev_address)
 		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
 		prev_address = address
 		hconverge=[]
@@ -1068,60 +1063,127 @@ def recall(prefix, env):
 		if debug:
 			print(" found_value = %s" % bina2str(found_value))
 			print(" created address used to start reading sequence:\n %s" % bina2str(address))
-		computed_address = address
-		computed_value = found_value			
-	else:
-		computed_address = paddress
-		computed_value = pvalue
+	computed_address = address
 	# now read sequence using address derived from prefix
-	ccount = 0
 	while True:
 		value = env.sdm.read(address)
 		new_address, found_char, top_matches = env.ma.next(address, value)
 		found.append(top_matches)
-		new_computed_address, new_computed_value = env.ma.add(computed_address, computed_value, found_char)
-		if ma == "wx2" and not (len(prefix) > 1 and new_address is None):
-			if debug:
-				print("read ---  addr=%s, value=%s" % (bina2str(address), bina2str(value)))
-				print(" computed  add=%s, value=%s" % (bina2str(computed_address), bina2str(computed_value)))
-				print("    new   addr=%s, found_char=%s" % (bina2str(new_address), found_char))
-				print(" new_computed,=%s, value=%s" % (bina2str(new_computed_address), bina2str(new_computed_value)))
-			# value read (b) has char part followed by xor part
-			recalled_xor_part = value[wh_len:] if len(prefix) == 1 else new_address[wh_len:]
-			computed_xor_part = new_computed_address[wh_len:]
-			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
-			# following to use computed_xor_part for all subsequent recall, ignoring what is in sdm for xor part
-			# computed_xor_part = xor_part
-			# test replacing xor part of address with read xor part:
-			# address = np.concatenate((address[0:wh_len], recalled_xor_part))
-		else:
-			# bchar = b
-			xor_hamming = None
-		if new_address is None:
-			# found stop char, or hamming distance to top match is over threshold
+		if new_address is None or len(word2) > max_num_recalled_chars:
 			break
-		# at this point, have:
-		#  address - address of value just read from memory
-		#  found_char - found character (printable code) derived from b
-		# wx2 method only:
-		#  recalled_xor_part - xor part read from memory (from b)
-		#  computed_xor_part - xor part computed at each iteration using previous address and value
+		word2 += found_char
 		diff = np.count_nonzero(address!=new_address)
 		found[-1].append("addr_diff=%s" % diff)
-		if xor_hamming:
-			found[-1].append(xor_hamming)
 		if diff == 0:
 			found[-1].append("found fixed point in address")
-			    #, address=\n%s" % (bina2str(new_address)))
 			break
+		if ma == "wx2":
+			recalled_xor_part = value[wh_len:]
+			computed_xor_part = computed_address[wh_len:]
+			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
+			found[-1].append(xor_hamming)
+			computed_address = env.ma.make_new_address(computed_address, env.cmap.char2bin(found_char))
 		address = new_address
-		computed_address = new_computed_address
-		computed_value = new_computed_value
-		word2 += found_char
-		ccount += 1
-		if ccount > max_num_recalled_chars:
-			break
 	return [found, word2]
+
+
+
+# def recall(prefix, env):
+# 	# recall sequence starting with prefix
+# 	# build address to start searching
+# 	word_length = env.pvals["word_length"]
+# 	# threshold = word_length * env.pvals["char_match_fraction"]
+# 	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
+# 	ma = env.pvals["merge_algorithm"]
+# 	if ma == "wx2":
+# 		wh_len = env.ma.pvals["wh_len"]
+# 		item_len = env.ma.pvals["item_len"]
+# 	debug = env.pvals["debug"]
+# 	address, value = env.ma.make_initial_address(prefix[0])
+# 	for char in prefix[1:]+"#":  # append '#' so make address corresponding to char to retrieve, ignore last value
+# 		paddress, pvalue = [address, value]
+# 		address, value = env.ma.add(address, value, char)
+# 		if env.pvals["debug"]:
+# 			print("recall, char='%s', address=%s, value=%s" % (char, bina2str(address), bina2str(value)))
+# 	found = [ prefix, ]
+# 	word2 = prefix
+# 	if ma  == "wx2" and len(prefix) > 1:
+# 		# iteratively read value at address until converges (no decrease in hamming distance between xor part in
+# 		# address and value read)
+# 		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
+# 		prev_address = address
+# 		hconverge=[]
+# 		max_steps = 10
+# 		while True:
+# 			found_value = env.sdm.read(address)
+# 			address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+# 			hdiff = hamming(prev_address, address)
+# 			hconverge.append(hdiff)
+# 			if hdiff == 0 or len(hconverge) > max_steps:
+# 				break
+# 			prev_address = address
+# 		f_non_zero = np.count_nonzero(found_value) / len(found_value)
+# 		print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
+# 		if f_non_zero < 0.1:
+# 			print("Failed to converge to valid data (found_value near zero)")
+# 			return [found, word2]
+# 		if debug:
+# 			print(" found_value = %s" % bina2str(found_value))
+# 			print(" created address used to start reading sequence:\n %s" % bina2str(address))
+# 		computed_address = address
+# 		computed_value = found_value			
+# 	else:
+# 		computed_address = paddress
+# 		computed_value = pvalue
+# 	# now read sequence using address derived from prefix
+# 	ccount = 0
+# 	while True:
+# 		value = env.sdm.read(address)
+# 		new_address, found_char, top_matches = env.ma.next(address, value)
+# 		found.append(top_matches)
+# 		new_computed_address, new_computed_value = env.ma.add(computed_address, computed_value, found_char)
+# 		if ma == "wx2" and not (len(prefix) > 1 and new_address is None):
+# 			if debug:
+# 				print("read ---  addr=%s, value=%s" % (bina2str(address), bina2str(value)))
+# 				print(" computed  add=%s, value=%s" % (bina2str(computed_address), bina2str(computed_value)))
+# 				print("    new   addr=%s, found_char=%s" % (bina2str(new_address), found_char))
+# 				print(" new_computed,=%s, value=%s" % (bina2str(new_computed_address), bina2str(new_computed_value)))
+# 			# value read (b) has char part followed by xor part
+# 			recalled_xor_part = value[wh_len:] if len(prefix) == 1 else new_address[wh_len:]
+# 			computed_xor_part = new_computed_address[wh_len:]
+# 			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
+# 			# following to use computed_xor_part for all subsequent recall, ignoring what is in sdm for xor part
+# 			# computed_xor_part = xor_part
+# 			# test replacing xor part of address with read xor part:
+# 			# address = np.concatenate((address[0:wh_len], recalled_xor_part))
+# 		else:
+# 			# bchar = b
+# 			xor_hamming = None
+# 		if new_address is None:
+# 			# found stop char, or hamming distance to top match is over threshold
+# 			break
+# 		# at this point, have:
+# 		#  address - address of value just read from memory
+# 		#  found_char - found character (printable code) derived from b
+# 		# wx2 method only:
+# 		#  recalled_xor_part - xor part read from memory (from b)
+# 		#  computed_xor_part - xor part computed at each iteration using previous address and value
+# 		diff = np.count_nonzero(address!=new_address)
+# 		found[-1].append("addr_diff=%s" % diff)
+# 		if xor_hamming:
+# 			found[-1].append(xor_hamming)
+# 		if diff == 0:
+# 			found[-1].append("found fixed point in address")
+# 			    #, address=\n%s" % (bina2str(new_address)))
+# 			break
+# 		address = new_address
+# 		computed_address = new_computed_address
+# 		computed_value = new_computed_value
+# 		word2 += found_char
+# 		ccount += 1
+# 		if ccount > max_num_recalled_chars:
+# 			break
+# 	return [found, word2]
 
 
 def recall_old(prefix, env):
