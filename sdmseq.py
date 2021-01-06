@@ -169,7 +169,7 @@ def do_interactive_commands(env):
 			line=input("> ")
 		except EOFError:
 			break;
-		if len(line) == 0 or line[0] not in "sruict":
+		if len(line) == 0 or line[0] not in "sruictv":
 			print(instructions)
 			continue
 		cmd = line[0]
@@ -191,7 +191,7 @@ def do_interactive_commands(env):
 			recall_strings(env, shlex.split(arg), prefix_mode=True)
 		elif cmd == "v" and len(arg) > 0:
 			print("reverse recall prefix %s" % arg)
-			reverse_recall_strings(env, shlex.split(arg))
+			recall_strings(env, shlex.split(arg), prefix_mode=True, reverse=True)
 		elif cmd == "r":
 			print("recall stored strings")
 			recall_param_strings(env)
@@ -324,9 +324,13 @@ class Merge_algorithm():
 		# given address and value at that address, return [new_address, char] character in reverse sequence
 		if self.name != "wx2":
 			print("function 'prev' of merge_algorithm '%s' not implementd" % self.name)
-		return [None, None, None]
+			return [None, None, None]
+		if not self.pvals["include_reverse_char"]:
+			print("include_reverse_char not set; to set it make first_bin_fraction integer + 0.5, (is now %s)" %
+				self.env.pvals["first_bin_fraction"])
+			return [None, None, None]
 		bchar0_part = self.get_bchar0_part(address)
-		top_matches = self.env.cmap.bin2char(bchar0_part)
+		top_matches = self.env.cmap.bin2char(bchar0_part, match_bits=len(bchar0_part))
 		char = top_matches[0][0]
 		if top_matches[0][1] > self.pvals["char_match_threshold"]:
 			# found stop char, or hamming distance to top match is over threshold
@@ -568,7 +572,8 @@ class Ma_wx2(Ma_wx):
 		assert self.name == "wx2"
 		if self.pvals["include_reverse_char"]:
 			item_input = np.concatenate((bchar2[0:self.pvals["len_item_part"]], 
-				address[self.pvals["last_char_position"]:self.pvals["wh_len"]]))
+				address[self.pvals["last_char_position"]:
+					self.pvals["last_char_position"]+self.pvals["len_reverse_part"]]))
 			assert len(item_input) == self.pvals["item_len"]
 		else:
 			item_input = bchar2[0:self.pvals["item_len"]]
@@ -584,7 +589,7 @@ class Ma_wx2(Ma_wx):
 		# return True if bins after first (in address) plus reverse part (in value) encode for char
 		tail_bins = np.concatenate((address[self.pvals["item_len"]:self.pvals["wh_len"]],
 			value[self.pvals["len_item_part"]:self.pvals["item_len"]]))
-		top_matches = self.env.cmap.bin2char(tail_bins)
+		top_matches = self.env.cmap.bin2char(tail_bins, match_bits=len(tail_bins))
 		char2 = top_matches[0][0]
 		hamming = top_matches[0][1]
 		return char == char2 and hamming < self.pvals["char_match_threshold"]
@@ -592,10 +597,10 @@ class Ma_wx2(Ma_wx):
 	def make_reverse_address(self, address, value, char, top_matches):
 		# if cannot find character matching reverse char, include that in "top_matches"
 		bchar0 = self.env.cmap.char2bin(char)
-		rev_part = value(value[self.pvals["len_item_part"]:self.pvals["item_len"]])
-		top_matches2 = self.env.cmap.bin2char(tail_bins)
+		rev_part = value[self.pvals["len_item_part"]:self.pvals["item_len"]]
+		top_matches2 = self.env.cmap.bin2char(rev_part, match_bits=len(rev_part))
 		rev_char, hamming = top_matches[0]
-		if hamming > self.pvals["char_match_threshold"] * (len(rev_part) / env.pvals["word_length"]):
+		if hamming > self.pvals["char_match_threshold"] * (len(rev_part) / self.env.pvals["word_length"]):
 			top.matches.append("rev_char lookup failed: %s" % top_matches2)
 			new_address = None
 		else:
@@ -603,6 +608,7 @@ class Ma_wx2(Ma_wx):
 			new_xor_part = np.roll(np.bitwise_xor(address[self.pvals["wh_len"]:],bchar0[0:self.pvals["xr_len"]]),-1)
 			new_address = np.concatenate((address[self.pvals["item_len"]:self.pvals["wh_len"]],
 				brev_char[0:self.pvals["item_len"]], new_xor_part))
+			assert len(new_address) == self.env.pvals["word_length"]
 		return new_address
 
 
@@ -1023,9 +1029,12 @@ def hamming(b1, b2):
 	return ndiff
 
 
-def recall(prefix, env):
+def recall(prefix, env, reverse=False):
 	# recall sequence starting with prefix
 	# build address to start searching
+	# reverse is True to search in reverse
+	if reverse and len(prefix) == 1:
+		return [ ["Error: cannot reverse recall with one char",], prefix]
 	word_length = env.pvals["word_length"]
 	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
 	ma = env.pvals["merge_algorithm"]
@@ -1067,7 +1076,7 @@ def recall(prefix, env):
 	# now read sequence using address derived from prefix
 	while True:
 		value = env.sdm.read(address)
-		new_address, found_char, top_matches = env.ma.next(address, value)
+		new_address, found_char, top_matches = env.ma.prev(address, value) if reverse else env.ma.next(address, value)
 		found.append(top_matches)
 		if new_address is None or len(word2) > max_num_recalled_chars:
 			break
@@ -1079,8 +1088,10 @@ def recall(prefix, env):
 			break
 		if ma == "wx2":
 			recalled_xor_part = value[wh_len:]
+			address_xor_part = address[wh_len:]
 			computed_xor_part = computed_address[wh_len:]
-			xor_hamming = " xor hamming =%s" % hamming(computed_xor_part, recalled_xor_part)
+			xor_hamming = " xorh cv=%s, av=%s" % (
+				hamming(computed_xor_part, recalled_xor_part), hamming(recalled_xor_part,address_xor_part))
 			found[-1].append(xor_hamming)
 			computed_address = env.ma.make_new_address(computed_address, env.cmap.char2bin(found_char))
 		address = new_address
@@ -1538,14 +1549,17 @@ def reverse_recall_strings(env, strings):
 		print("found: '%s'" % word2)
 
 
-def recall_strings(env, strings, prefix_mode = False):
+def recall_strings(env, strings, prefix_mode = False, reverse = False):
 	# recall list of strings starting with first character of each
 	# if prefix_mode is True, use entire string as prefix for recall
+	if reverse and not prefix_mode:
+		print("reverse recall not allowed with just first char of string")
+		return
 	error_count = 0
 	for word in strings:
 		print ("\nRecall '%s'" % word)
 		prefix = word if prefix_mode else word[0]
-		found, word2 = recall(prefix, env)
+		found, word2 = recall(prefix, env, reverse)
 		if word != word2:
 			error_count += 1
 			msg = "ERROR"
