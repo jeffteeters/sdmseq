@@ -250,10 +250,19 @@ def find_matches(m, b, nret, index_only = False, match_bits=None):
 		top_matches = [x[0] for x in top_matches]
 	return top_matches
 
-def initialize_binary_matrix(nrows, ncols):
+def initialize_binary_matrix(nrows, ncols, force_unique=False):
 	# create binary matrix with each row having binary random number
+	# if force_unique is True, fource first four bits be unique (used for debugging)
 	assert ncols % 2 == 0, "ncols must be even"
 	bm = np.random.randint(2, size=(nrows, ncols), dtype=np.int8)
+	if force_unique:
+		vals = np.arange(16)
+		np.random.shuffle(vals)
+		for i in range(len(vals)):
+			val = vals[i]
+			vala = np.unpackbits(np.uint8(val))
+			bm[i][0:4] = vala[4:8]
+
 	# if repeat:
 	# 	# make second half of each word same as first half.  Used in wx2 method.
 	# 	bm[:,int(ncols/2):] = bm[:,0:int(ncols/2)]
@@ -520,6 +529,14 @@ class Ma_wx(Merge_algorithm):
 		if(self.pvals["wh_len"] > 0):
 			# select bits specified by hist_bits and first part of item
 			hist_part = np.concatenate((bchar1[0:self.pvals["item_len"]], address[self.pvals["hist_bits"]]))
+			if self.env.pvals["first_bin_fraction"] > 1:
+				# test to make sure fancy_indexing is working
+				last_char_position = sum(self.pvals["bin_sizes"][0:-1])
+				hist2_part = np.concatenate((bchar1[0:self.pvals["item_len"]],
+					address[0:last_char_position]))
+				if hamming(hist_part, hist2_part) != 0:
+					print("difference found in hist_bits vs direct shift in wx2 make_new_address")
+					import pdb; pdb.set_trace()
 			if self.pvals["xr_len"] == 0:
 				# no xor component
 				assert len(hist_part) == self.env.pvals["word_length"], ("wx algorithm, no xor part, but len(hist_part) %s"
@@ -596,12 +613,16 @@ class Ma_wx2(Ma_wx):
 
 	def make_reverse_address(self, address, value, char, top_matches):
 		# if cannot find character matching reverse char, include that in "top_matches"
+		# char is char specified in first bin of address (most recent character in sequence)
+		if self.env.pvals["debug"] == 1:
+			print("Entered make_reverse_address\naddr=%s\nvalu=%s, char=%s" % (
+				bina2str(address), bina2str(value), char))
 		bchar0 = self.env.cmap.char2bin(char)
 		rev_part = value[self.pvals["len_item_part"]:self.pvals["item_len"]]
 		top_matches2 = self.env.cmap.bin2char(rev_part, match_bits=len(rev_part))
-		rev_char, hamming = top_matches[0]
+		rev_char, hamming = top_matches2[0]
 		if hamming > self.pvals["char_match_threshold"] * (len(rev_part) / self.env.pvals["word_length"]):
-			top.matches.append("rev_char lookup failed: %s" % top_matches2)
+			top_matches.append("rev_char lookup failed: %s" % top_matches2)
 			new_address = None
 		else:
 			brev_char = self.env.cmap.char2bin(rev_char)
@@ -609,6 +630,8 @@ class Ma_wx2(Ma_wx):
 			new_address = np.concatenate((address[self.pvals["item_len"]:self.pvals["wh_len"]],
 				brev_char[0:self.pvals["item_len"]], new_xor_part))
 			assert len(new_address) == self.env.pvals["word_length"]
+		if self.env.pvals["debug"] == 1:
+			print("Finished make_reverse_address\nnadr=%s, rev_char='%s'" % (bina2str(new_address), rev_char))
 		return new_address
 
 
@@ -921,7 +944,7 @@ class Char_map:
 		self.chars += "#"  # stop char - used to indicate end of sequence
 		self.check_length()
 		self.debug = debug
-		self.binary_vals = initialize_binary_matrix(self.max_unique_chars, word_length)
+		self.binary_vals = initialize_binary_matrix(self.max_unique_chars, word_length, force_unique=debug)
 		if debug:
 			self.show_codes()
 
@@ -1025,6 +1048,7 @@ def bina2str(address):
 
 def hamming(b1, b2):
 	# compute hamming distance
+	assert len(b1) == len(b2)
 	ndiff = np.count_nonzero(b1!=b2)
 	return ndiff
 
@@ -1309,7 +1333,7 @@ def recall_old(prefix, env):
 			break
 	return [found, word2]
 
-def store_strings(env, strings):
+def store_strings_orig(env, strings):
 	# debug = env.pvals["debug"] == 1
 	for string in strings:
 		print("storing '%s'" % string)
@@ -1320,6 +1344,35 @@ def store_strings(env, strings):
 		env.record_saved_string(string)
 		# if debug:
 		# 	print(" bchr:%s - %s" % (bina2str(bchar), char))
+
+# for testing
+def store_strings(env, strings):
+	# debug = env.pvals["debug"] == 1
+	for string in strings:
+		print("storing '%s'" % string)
+		add_addresses = []
+		address, value = env.ma.make_initial_address(string[0])
+		for char in string[1:]+"#":  # add stop character at end
+			address, value = env.ma.add(address, value, char)
+			env.sdm.store(address, value)
+			add_addresses.append(address)
+		env.record_saved_string(string)
+		# if debug:
+		# 	print(" bchr:%s - %s" % (bina2str(bchar), char))
+		prefix = string
+		address = env.cmap.char2bin(prefix[0])
+		na = []
+		for char in prefix:
+			address = env.ma.make_new_address(address, env.cmap.char2bin(char))
+			na.append(address)
+		assert len(na) == len(add_addresses)
+		for i in range(len(na)):
+			char = string[i]
+			hdist = hamming(na[i], add_addresses[i])
+			if hdist != 0:
+				print("store_string, hamming mismatch, '%s', %s" % (char, hdist))
+				print("addr: %s" % bina2str(add_addresses[i]))
+				print("makr: %s" % bina2str(na[i]))
 
 
 # def store_strings_old3(env, strings):
