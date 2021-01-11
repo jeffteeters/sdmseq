@@ -296,20 +296,30 @@ class Merge_algorithm():
 		self.pvals = {}
 		self.initialize()
 
-	def make_initial_address(self, char):
-		# returns (address, value) corresponding to starting character char
-		bchar = self.env.cmap.char2bin(char)
-		return (bchar, bchar)	
+	def make_initial_address(self, bchar0):
+		# make initial address for starting sequence.  wx2 overrides this
+		return self.make_new_address(bchar0, bchar0)
 
 
-	def add(self, address, value, char):
+	def make_initial_value(self, address, bchar1):
+		# make value associated with address.  wx2 overides this
+		return bchar1
+
+	# def make_initial_address_old(self, char):
+	# 	# returns (address, value) corresponding to starting character char
+	# 	bchar = self.env.cmap.char2bin(char)
+	# 	return (bchar, bchar)	
+
+
+	def add_old(self, address, value, char, cindex):
 		# add character char to sequence
 		# address and value is current address and value at that address before adding char to sequence
+		# cindex is the index of char in the sequence (zero based)
 		# Returns (new_address, new_value) - new address and the value to store at that address
 		bchar2 = self.env.cmap.char2bin(char)
 		bchar1 = self.get_bchar1(value)
 		new_address = self.make_new_address(address, bchar1)
-		new_value = self.make_new_value(address, new_address, bchar2)
+		new_value = self.make_new_value(address, new_address, bchar2, cindex)
 		return (new_address, new_value)
 
 	def next(self, address, value):
@@ -345,10 +355,9 @@ class Merge_algorithm():
 			# found stop char, or hamming distance to top match is over threshold
 			new_address = None
 		else:
-			if self.reverse_end_found(address, value, char):
-				new_address = None
-			else:
-				new_address = self.make_reverse_address(address, value, char, top_matches)
+			new_address = self.make_reverse_address(address, value, char, top_matches)
+			if new_address is None:
+				char = self.extract_sequence_prefix(address) + char
 		return [new_address, char, top_matches]
 
 	# following default functions MAY be overridden in subclassses
@@ -364,7 +373,7 @@ class Merge_algorithm():
 		# return full length
 		return value
 
-	def make_new_value(self, address, new_address, bchar2):
+	def make_new_value(self, address, new_address, bchar2, cindex):
 		return bchar2
 
 	# following function must be provided in subclass to implement the merge_algorithm
@@ -457,8 +466,9 @@ class Ma_wx(Merge_algorithm):
 				last_char_position = sum(bin_sizes[0:-1])  # position of reverse character
 				len_item_part = round(bin0_len / 2.0)
 				len_reverse_part = bin0_len - len_item_part
+				empty_flag = self.env.cmap.char2bin("#")[0:len_reverse_part]  # bits for end of string character
 				self.pvals.update( {"last_char_position":last_char_position, "len_item_part":len_item_part,
-					"len_reverse_part":len_reverse_part} )
+					"len_reverse_part":len_reverse_part, "empty_flag":empty_flag} )
 		self.pvals.update( {"wh_len":wh_len, "xr_len":xr_len})
 
 	# def add(self, address, value, char):
@@ -573,6 +583,88 @@ class Ma_wx(Merge_algorithm):
 class Ma_wx2(Ma_wx):
 	# similar to wx, except data value includes xor part
 
+	def make_initial_address(self, bchar0):
+		# make initial address for starting sequence
+		# wx2 algorithm stores char shifted and xor'd with self to make xor part
+		# stores prefix of xor part after all bins with valid content
+		assert self.pvals["wh_len"] > 0 and self.pvals["xr_len"] > 0, "wx2 algorithm requires wh_len and xr_len > 0"
+		assert self.env.pvals["first_bin_fraction"] > 1, "wx2 algorithm now requires equal bin sizes"
+		xor_part = bchar0[0:self.pvals["xr_len"]]
+		xor_part = np.bitwise_xor(np.roll(xor_part, 1), xor_part)
+		hist_part = bchar0[0:self.pvals["wh_len"]]
+		initial_address = np.concatenate((hist_part, xor_part))
+		assert len(initial_address) == self.env.pvals["word_length"]
+		return initial_address
+
+
+	def make_initial_address_with_xor_bins(self, char0):
+		# make initial address for starting sequence
+		# wx2 algorithm stores char shifted and xor'd with self to make xor part
+		# stores prefix of xor part after all bins with valid content
+		assert self.pvals["wh_len"] > 0 and self.pvals["xr_len"] > 0, "wx2 algorithm requires wh_len and xr_len > 0"
+		assert self.env.pvals["first_bin_fraction"] > 1, "wx2 algorithm now requires equal bin sizes"
+		num_bins = len(self.pvals["bin_sizes"])
+		item_len = self.pvals["item_len"]
+		assert num_bins * item_len == self.pvals["wh_len"]
+		bchar0 = self.env.cmap.char2bin(char0)
+		xor_part = bchar0[0:self.pvals["xr_len"]]
+		xor_part = np.bitwise_xor(np.roll(xor_part, 1), xor_part)
+		item_part = bchar0[0:self.pvals["item_len"]]
+		xor_bin = xor_part[0:self.pvals["item_len"]]
+		hist_part = np.tile(xor_bin, num_bins - 1)
+		initial_address = np.concatenate((item_part, hist_part, xor_part))
+		assert len(initial_address) == self.env.pvals["word_length"]
+		return initial_address
+
+
+	def make_initial_value(self, address, bchar2):
+		# make value associated with initial address
+		assert self.name == "wx2"
+		if self.pvals["include_reverse_char"]:
+			item_input = np.concatenate((bchar2[0:self.pvals["len_item_part"]], self.pvals["empty_flag"]))
+			assert len(item_input) == self.pvals["item_len"]
+		else:
+			item_input = bchar2[0:self.pvals["item_len"]]
+		value = np.concatenate((item_input, address[self.pvals["item_len"]:]))
+		assert len(value) == self.env.pvals["word_length"]
+		return value
+
+	def make_new_address(self, address, bchar1):
+		# for wx2, insert item and shift history all one bin (bins are same size)
+		wh_len = self.pvals["wh_len"]
+		item_len = self.pvals["item_len"]
+		item_part = bchar1[0:item_len]
+		hist_part = address[0:wh_len-item_len]
+		xor_part = address[wh_len:]
+		xor_part = np.bitwise_xor(np.roll(xor_part, 1), bchar1[0:self.pvals["xr_len"]])
+		new_address = np.concatenate((item_part, hist_part, xor_part))
+		return new_address
+
+
+	def make_new_address_with_xor_bins(self, address, bchar1):
+		# for wx2, first find bins that have no content (match xor part).  Then shift bins right, make new xor part
+		wh_len = self.pvals["wh_len"]
+		xor_part = address[wh_len:]
+		num_bins = len(self.pvals["bin_sizes"])
+		item_len = self.pvals["item_len"]
+		xor_bin = xor_part[0:item_len]
+		threshold = int(item_len * self.env.pvals["char_match_fraction"])
+		for i in range(num_bins -2, -1, -1):
+			if i == 0 or hamming(address[i*item_len:(i+1)*item_len], xor_bin) > threshold:
+				break
+		last_valid_bin = i
+		item_part = bchar1[0:item_len]
+		hist_part = address[0:(last_valid_bin+1)*item_len]
+		num_xor_bins = max(0, num_bins - (last_valid_bin + 2))
+		new_xor_part = np.bitwise_xor(np.roll(xor_part, 1), bchar1[0:wh_len])
+		new_xor_bin = new_xor_part[0:item_len]
+		xor_bins = np.tile(new_xor_bin, num_xor_bins)
+		new_address = np.concatenate((item_part, hist_part, xor_bins, new_xor_part))
+		if len(new_address) != self.env.pvals["word_length"]:
+			import pdb; pdb.set_trace()
+		assert len(new_address) == self.env.pvals["word_length"]
+		return new_address
+
 	def get_bchar1_part(self, value):
 		# get bits for <char_t+1> from value
 		assert self.name == "wx2"
@@ -585,12 +677,16 @@ class Ma_wx2(Ma_wx):
 		bchar1 = self.env.cmap.part2full(bchar1_part, match_bits = match_bits)
 		return bchar1
 
-	def make_new_value(self, address, new_address, bchar2):
+	def make_new_value(self, address, new_address, bchar2, cindex):
+		# bchar2 is item to store in value (next character in sequence)
+		# cindex is 0-based index of bchar2 in the sequence.  It is used when filling in reverse char part of value
 		assert self.name == "wx2"
 		if self.pvals["include_reverse_char"]:
-			item_input = np.concatenate((bchar2[0:self.pvals["len_item_part"]], 
-				address[self.pvals["last_char_position"]:
-					self.pvals["last_char_position"]+self.pvals["len_reverse_part"]]))
+			num_bins = len(self.pvals["bin_sizes"])
+			rev_part = (self.pvals["empty_flag"] if cindex <= num_bins else address[self.pvals["last_char_position"]:
+					self.pvals["last_char_position"]+self.pvals["len_reverse_part"]])
+			fwd_part = bchar2[0:self.pvals["len_item_part"]]
+			item_input = np.concatenate((fwd_part, rev_part))
 			assert len(item_input) == self.pvals["item_len"]
 		else:
 			item_input = bchar2[0:self.pvals["item_len"]]
@@ -598,11 +694,12 @@ class Ma_wx2(Ma_wx):
 		assert len(new_value) == self.env.pvals["word_length"]
 		return new_value
 
+
 	def get_bchar0_part(self, address):
 		# return bits of item_t0 (first bin of address in wx2 algorithm)
 		return address[0:self.pvals["item_len"]]
 
-	def reverse_end_found(self, address, value, char):
+	def reverse_end_found_old(self, address, value, char):
 		# return True if bins after first (in address) plus reverse part (in value) encode for char
 		tail_bins = np.concatenate((address[self.pvals["item_len"]:self.pvals["wh_len"]],
 			value[self.pvals["len_item_part"]:self.pvals["item_len"]]))
@@ -611,7 +708,117 @@ class Ma_wx2(Ma_wx):
 		hamming = top_matches[0][1]
 		return char == char2 and hamming < self.pvals["char_match_threshold"]
 
+
 	def make_reverse_address(self, address, value, char, top_matches):
+		# if cannot find character matching reverse char, include that in "top_matches"
+		# char is char specified in first bin of address (most recent character in sequence)
+		# shift bins left, insert bits from reverse char (in value), unless it matches empty_flag
+		debug = self.env.pvals["debug"] == 1
+		rev_part = value[self.pvals["len_item_part"]:self.pvals["item_len"]]
+		rev_top_matches = self.env.cmap.bin2char(rev_part, match_bits=len(rev_part))
+		rev_char, hdist = rev_top_matches[0]
+		if rev_char == "#":
+			# stop going back, remaining characters of sequence are in value bins
+			return None
+		brev_char = self.env.cmap.char2bin(rev_char)
+		item_len = self.pvals["item_len"]
+		wh_len = self.pvals["wh_len"]
+		hist_part = address[item_len:wh_len]
+		bchar0 = self.env.cmap.char2bin(char)
+		xor_part = np.roll(np.bitwise_xor(address[wh_len:],bchar0[0:self.pvals["xr_len"]]),-1)
+		reverse_address = np.concatenate((hist_part, brev_char[0:item_len], xor_part))
+		return reverse_address
+
+	def extract_sequence_prefix(self, address):
+		# extract prefix of sequence from bins in value
+		debug = self.env.pvals["debug"] == 1
+		num_bins = len(self.pvals["bin_sizes"])
+		item_len = self.pvals["item_len"]
+		found = ""
+		threshold = int(item_len * self.env.pvals["char_match_fraction"])
+		if debug:
+			print("entered sequence_prefix, address=%s, threshold=%s" % (bina2str(address), threshold))
+		for i in range(num_bins):
+			top_matches = self.env.cmap.bin2char(address[i*item_len:(i+1)*item_len], match_bits=item_len)
+			char, hdist = top_matches[0]
+			if hdist > threshold:
+				char = "?"
+			if debug:
+				print("bin %s, item=%s, top_matches=%s, char=%s" % (i, bina2str(address[i*item_len:(i+1)*item_len]),
+					top_matches, char))
+			found = char + found
+		return "[" + found + "]"
+
+
+	def make_reverse_address_with_xor_bins(self, address, value, char, top_matches):
+		# if cannot find character matching reverse char, include that in "top_matches"
+		# char is char specified in first bin of address (most recent character in sequence)
+		debug = self.env.pvals["debug"] == 1
+		wh_len = self.pvals["wh_len"]
+		xor_part = address[wh_len:]
+		num_bins = len(self.pvals["bin_sizes"])
+		item_len = self.pvals["item_len"]
+		xor_bin = xor_part[0:item_len]
+		threshold = int(item_len * self.env.pvals["char_match_fraction"])
+		for i in range(num_bins-1, -1, -1):
+			if i == 0 or hamming(address[i*item_len:(i+1)*item_len], xor_bin) > threshold:
+				break
+		last_valid_bin = i
+		if last_valid_bin == 0:
+			# no more previous characters
+			return None
+		bchar0 = self.env.cmap.char2bin(char)
+		new_xor_part = np.roll(np.bitwise_xor(address[wh_len:],bchar0[0:self.pvals["xr_len"]]),-1)
+		if last_valid_bin == num_bins - 1:
+			# all bins have valid data, check reverse char in value to see if it's valid
+			rev_part = value[self.pvals["len_item_part"]:self.pvals["item_len"]]
+			threshold_rev = int(item_len * self.env.pvals["char_match_fraction"])
+			if debug:
+				rhv = hamming(rev_part, xor_part[0:self.pvals["len_reverse_part"]])
+				print("rev_part=%s, threshold_rev=%s, xor_part[]=%s, rhv=%s, >t=%s" % (bina2str(rev_part), threshold_rev, 
+					bina2str(xor_part[0:self.pvals["len_reverse_part"]]), rhv, rhv > threshold_rev))
+			if hamming(rev_part, xor_part[0:self.pvals["len_reverse_part"]]) > threshold_rev:
+				# yes, should be valid character in reverse part, obtain full character
+				rev_top_matches = self.env.cmap.bin2char(rev_part, match_bits=len(rev_part))
+				rev_char, hdist = rev_top_matches[0]
+				if debug:
+					print("rev_char=%s" % rev_char)
+				if hdist > threshold_rev:
+					top_matches.append("rev_char lookup failed: %s" % rev_top_matches)
+					return None
+				# found valid character, include it
+				last_bin = self.env.cmap.char2bin(rev_char)[0:item_len]
+				reverse_address = np.concatenate((address[item_len:wh_len], last_bin, new_xor_part))
+				return reverse_address
+		# no need to include previous character in new address (getting close to start of sequence)
+		if debug:
+			print("not all bins have valid data")
+			import pdb; pdb.set_trace()
+		new_xor_bin = new_xor_part[0:item_len]
+		num_xor_bins = num_bins - last_valid_bin
+		xor_bins = np.tile(new_xor_bin, num_xor_bins)
+		hist_part = address[item_len: item_len * (last_valid_bin + 1)]
+		reverse_address = np.concatenate((hist_part, xor_bins, new_xor_part))
+		return reverse_address
+
+
+
+	# def find_last_valid_bin(self, address):
+	# 	# finds last bin that contains valid character data (is not matching xor bits)
+	# 	wh_len = self.pvals["wh_len"]
+	# 	xor_part = address[wh_len:]
+	# 	num_bins = len(self.env.pvals["bin_sizes"])
+	# 	item_len = self.pvals["item_len"]
+	# 	xor_bin = xor_part[0:item_len]
+	# 	threshold = int(item_len * self.env.pval["char_match_fraction"])
+	# 	for i in range(nbins, -1, -1):
+	# 		if i == 0 or hamming(address[i*item_len:(i+1)*item_len], xor_bin) > threshold:
+	# 			break
+	# 	last_valid_bin = i
+	# 	return last_valid_bin
+
+
+	def make_reverse_address_old(self, address, value, char, top_matches):
 		# if cannot find character matching reverse char, include that in "top_matches"
 		# char is char specified in first bin of address (most recent character in sequence)
 		if self.env.pvals["debug"] == 1:
@@ -1066,11 +1273,13 @@ def recall(prefix, env, reverse=False):
 		wh_len = env.ma.pvals["wh_len"]
 		item_len = env.ma.pvals["item_len"]
 	debug = env.pvals["debug"]
-	# address, value = env.ma.make_initial_address(prefix[0])
 	# create initial address from prefix
-	address = env.cmap.char2bin(prefix[0])
-	for char in prefix:
+	address = env.ma.make_initial_address(env.cmap.char2bin(prefix[0])) # env.cmap.char2bin(prefix[0])
+	for char in prefix[1:]:
 		address = env.ma.make_new_address(address, env.cmap.char2bin(char))
+	# address = env.cmap.char2bin(prefix[0])
+	# for char in prefix:
+	# 	address = env.ma.make_new_address(address, env.cmap.char2bin(char))
 	found = [ prefix, ]
 	word2 = prefix
 	if ma  == "wx2" and len(prefix) > 1:
@@ -1102,9 +1311,12 @@ def recall(prefix, env, reverse=False):
 		value = env.sdm.read(address)
 		new_address, found_char, top_matches = env.ma.prev(address, value) if reverse else env.ma.next(address, value)
 		found.append(top_matches)
+		if reverse:
+			word2 = found_char + word2
+		else:
+			word2 += found_char
 		if new_address is None or len(word2) > max_num_recalled_chars:
 			break
-		word2 += found_char
 		diff = np.count_nonzero(address!=new_address)
 		found[-1].append("addr_diff=%s" % diff)
 		if diff == 0:
@@ -1333,6 +1545,39 @@ def recall_old(prefix, env):
 			break
 	return [found, word2]
 
+
+def store_strings(env, strings):
+	# debug = env.pvals["debug"] == 1
+	for string in strings:
+		print("storing '%s'" % string)
+		address = env.ma.make_initial_address(env.cmap.char2bin(string[0]))
+		bchar1 = env.cmap.char2bin(string[1])
+		value = env.ma.make_initial_value(address, bchar1)
+		env.sdm.store(address, value)
+		strpstop = string+"#"
+		for cindex in range(2, len(strpstop)):
+			bchar2 = env.cmap.char2bin(strpstop[cindex])
+			new_address = env.ma.make_new_address(address, bchar1)
+			new_value = env.ma.make_new_value(address, new_address, bchar2, cindex)
+			env.sdm.store(new_address, new_value)
+			bchar1 = bchar2
+			address = new_address
+		env.record_saved_string(string)
+
+
+def store_strings_a1(env, strings):
+	# debug = env.pvals["debug"] == 1
+	for string in strings:
+		print("storing '%s'" % string)
+		address = env.ma.make_initial_address(string[0])
+		value = env.ma.make_initial_value(address, string[1])
+		env.sdm.store(address, value)
+		for char in string[2:]+"#":  # add stop character at end
+			address, value = env.ma.add(address, value, char)
+			env.sdm.store(address, value)
+		env.record_saved_string(string)
+
+
 def store_strings_orig(env, strings):
 	# debug = env.pvals["debug"] == 1
 	for string in strings:
@@ -1345,8 +1590,41 @@ def store_strings_orig(env, strings):
 		# if debug:
 		# 	print(" bchr:%s - %s" % (bina2str(bchar), char))
 
+# original
+
+
+
+def add_draft(self, address, value, char):
+	# add character char to sequence
+	# address and value is current address and value at that address before adding char to sequence
+	# Returns (new_address, new_value) - new address and the value to store at that address
+	bchar2 = self.env.cmap.char2bin(char)
+	bchar1 = self.get_bchar1(value)
+	if address is none:
+		new_address, new_value = make_initial_address(bchar1, bchar2)
+	else:
+		new_address = self.make_new_address(address, bchar1)
+		new_value = self.make_new_value(address, new_address, bchar2)
+	return (new_address, new_value)
+
+
+
+
+def store_strings_new2(env, strings):
+	# debug = env.pvals["debug"] == 1
+	for string in strings:
+		print("storing '%s'" % string)
+		address = None
+		value = string[0]
+		for char in string[1:]+"#":  # add stop character at end
+			address, value = env.ma.add(address, value, char)
+			env.sdm.store(address, value)
+		env.record_saved_string(string)
+
+
+
 # for testing
-def store_strings(env, strings):
+def store_strings_for_testing(env, strings):
 	# debug = env.pvals["debug"] == 1
 	for string in strings:
 		print("storing '%s'" % string)
