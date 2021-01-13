@@ -41,6 +41,9 @@ class Env:
 	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins OR an integer + 0.5 to store "
 	 	  "reverse character in value (wx2 algorithm)", "type":float}, "flag":"fbf",
 	 	  "required_init":"m", "default":8},
+	 	{ "name":"converge_count", "kw":{"help":"Converge count for wx2; format: <int1>,<int2>; <int1> number of reads to converge "
+	 	  "for each seed addresss, <int2> number of seeds to try", "type":str}, "flag":"cvc",
+	 	  "required_init":"", "default":"15,5"},
 	 	{ "name":"debug", "kw":{"help":"Debug mode","type":int, "choices":[0, 1]},
 		   "flag":"d", "required_init":"", "default":0},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "required_init":"",
@@ -1010,6 +1013,45 @@ def hamming(b1, b2):
 	ndiff = np.count_nonzero(b1!=b2)
 	return ndiff
 
+def converge(env, address, pb_len):
+	# converge address by reapeat reading so bits after pb_len match bits read from memory
+	prev_address = address
+	hconverge=[]
+	seed_count = 1
+	max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
+	seed = address
+	while True:
+		found_value = env.sdm.read(address)
+		address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+		hdiff = hamming(prev_address, address)
+		hconverge.append(hdiff)
+		f_non_zero = np.count_nonzero(found_value) / len(found_value)
+		if hdiff == 0:
+			print("Seed %s,iterative converged in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count,
+				len(hconverge), f_non_zero, hconverge))
+			break
+		if len(hconverge) > max_steps:
+			print("Seed %s, did not converge in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count, len(hconverge),
+				f_non_zero, hconverge))
+			if seed_count >= max_seeds:
+				print("Converge failed after %s seeds" % seed_count)
+				break
+			seed_count += 1
+			hconverge=[]
+			# make a new seed for next convergence attempt
+			seed = np.bitwise_xor(np.roll(seed, 1), seed)
+			address =  np.concatenate((address[0:pb_len], seed[pb_len:]))
+		prev_address = address
+	# if f_non_zero < 0.1:
+	# 	print("Failed to converge to valid data (found_value near zero)")
+	# 	return [found, word2]
+
+	# if debug:
+	# 	print(" found_value = %s" % bina2str(found_value))
+	# 	print(" created address used to start reading sequence:\n %s" % bina2str(address))
+	return [address, f_non_zero, found_value]
+
+
 
 def recall(prefix, env, reverse=False):
 	# recall sequence starting with prefix
@@ -1043,22 +1085,26 @@ def recall(prefix, env, reverse=False):
 		# address and prev_address)
 		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
 		# max_converge_trys = 10
-		prev_address = address
-		hconverge=[]
-		max_steps = 10
-		while True:
-			found_value = env.sdm.read(address)
-			address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
-			hdiff = hamming(prev_address, address)
-			hconverge.append(hdiff)
-			if hdiff == 0 or len(hconverge) > max_steps:
-				break
-			prev_address = address
-		f_non_zero = np.count_nonzero(found_value) / len(found_value)
-		print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
+		address, f_non_zero, found_value = converge(env, address, pb_len)
 		if f_non_zero < 0.1:
 			print("Failed to converge to valid data (found_value near zero)")
 			return [found, word2]
+		# prev_address = address
+		# hconverge=[]
+		# max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
+		# while True:
+		# 	found_value = env.sdm.read(address)
+		# 	address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+		# 	hdiff = hamming(prev_address, address)
+		# 	hconverge.append(hdiff)
+		# 	if hdiff == 0 or len(hconverge) > max_steps:
+		# 		break
+		# 	prev_address = address
+		# f_non_zero = np.count_nonzero(found_value) / len(found_value)
+		# print("Iterative converge in %s steps, f_non_zero=%s, hdiff=%s" % (len(hconverge), f_non_zero, hconverge))
+		# if f_non_zero < 0.1:
+		# 	print("Failed to converge to valid data (found_value near zero)")
+		# 	return [found, word2]
 		if debug:
 			print(" found_value = %s" % bina2str(found_value))
 			print(" created address used to start reading sequence:\n %s" % bina2str(address))
