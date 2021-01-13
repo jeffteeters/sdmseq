@@ -259,11 +259,34 @@ def make_permutation_map(length):
 	# create permutation map for history vector.  This done because the numpy function I found
 	# np.random.RandomState(seed=42).permutation(b) does not always include all the elements in
 	# the permutation
+	# the routine here works by having shifts go through order of indexes that are random
+	shuffled_indices = np.arange(length)
+	np.random.shuffle(shuffled_indices)
+	# map each index to the next one in the shuffled list
+	index_map = np.full(length, -1, dtype=np.int)
+	for i in range(length):
+		from_index = shuffled_indices[i]
+		to_index = shuffled_indices[(i+1) % length]
+		assert index_map[to_index] == -1
+		index_map[to_index] = from_index
+	assert len(np.where(index_map==-1)[0]) == 0, "Did not fill all values in index_map"
+	# map_index = [shuffled_indices[(i+1) % length] for i in range(length)]
+	return index_map
+
+def make_permutation_map_orig(length):
+	# create permutation map for history vector.  This done because the numpy function I found
+	# np.random.RandomState(seed=42).permutation(b) does not always include all the elements in
+	# the permutation
+	# NOTE: This routine is not correct, can create a non-cyclic permutation.  But it has allowed
+	# distinguishing these two long strings:
+	# 'tom smith is studying at the university of california at berkeley in the department of math'
+	# 'sue jones is studying at the university of california at berkeley in the department of eecs'
 	shuffled_indices = np.arange(length)
 	np.random.shuffle(shuffled_indices)
 	# map each index to the next one in the shuffled list
 	map_index = [shuffled_indices[(i+1) % length] for i in range(length)]
-	return map_index
+	return map_index 
+
 
 class Merge_algorithm():
 	# Abstract class for algorithms used for creating address and data to store and recall sequences
@@ -1008,12 +1031,18 @@ def recall(prefix, env, reverse=False):
 	# address = env.cmap.char2bin(prefix[0])
 	# for char in prefix:
 	# 	address = env.ma.make_new_address(address, env.cmap.char2bin(char))
-	found = [ prefix, ]
-	word2 = prefix
+	if not reverse:
+		found = [ prefix, ]
+		word2 = prefix
+	else:
+		# for reverse, don't include prefix since it will be recalled in reverse
+		found = []
+		word2 = ""
 	if ma  == "wx2" and len(prefix) > 1:
 		# iteratively read value at address until converges (no decrease in hamming distance between xor part in
 		# address and prev_address)
 		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
+		# max_converge_trys = 10
 		prev_address = address
 		hconverge=[]
 		max_steps = 10
@@ -1041,10 +1070,10 @@ def recall(prefix, env, reverse=False):
 		found.append(top_matches)
 		if reverse:
 			word2 = found_char + word2
-		else:
-			word2 += found_char
 		if new_address is None or len(word2) > max_num_recalled_chars:
 			break
+		if not reverse:
+			word2 += found_char
 		diff = np.count_nonzero(address!=new_address)
 		found[-1].append("addr_diff=%s" % diff)
 		if diff == 0:
@@ -1083,21 +1112,26 @@ def store_strings(env, strings):
 
 def test_merge_convergence(env):
 	# test how fast address for substring converges to address for full string
-	string = "abcdefghijklmnopqrstuvwxyz"
-	b0 = env.cmap.char2bin(string[0])
-	address = env.merge.merge(b0, b0)
-	b1 = env.cmap.char2bin(string[1])
-	address = env.merge.merge(b1, address)
-	subaddr = env.merge.merge(b1, b1)
-	result = []
-	for char in string[2:]:
+	string = "abcdefghijklmnopqrstuvwxyz0123456789"
+	address = env.ma.make_initial_address(env.cmap.char2bin(string[-2]))
+	subaddr = env.ma.make_initial_address(env.cmap.char2bin(string[-1]))
+	result = ""
+	ccount = 0
+	while ccount <= (env.pvals["word_length"]+2):
+		char = string[ccount % len(string)]
 		bchar = env.cmap.char2bin(char)
-		address = env.merge.merge(bchar, address)
-		subaddr = env.merge.merge(bchar, subaddr)
+		address = env.ma.make_new_address(address, bchar)
+		subaddr = env.ma.make_new_address(subaddr, bchar)
 		distance = hamming(address, subaddr)
-		result.append((char, distance))
-	print("Convergence for merge %s, hf=%s, xf=%s, start_bit=%s:\n%s" % (env.pvals["merge_algorithm"],
-		env.pvals["history_fraction"], env.pvals["xor_fraction"], env.pvals["start_bit"], result))
+		result+="%s-%s " %(ccount+1, distance)
+		if distance == 0:
+			break
+		ccount += 1
+		if ccount % 25 == 0:
+			result+="\n"
+	print("Convergence for merge %s, hf=%s, xf=%s, fbf=%s, start_bit=%s:\n%s" % (env.pvals["merge_algorithm"],
+		env.pvals["history_fraction"], env.pvals["xor_fraction"], env.pvals["first_bin_fraction"],
+		env.pvals["start_bit"], result))
 
 
 def store_param_strings(env):
