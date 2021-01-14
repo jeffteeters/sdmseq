@@ -1020,10 +1020,14 @@ def converge(env, address, pb_len):
 	seed_count = 1
 	max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
 	seed = address
+	best_hdiff = env.pvals["word_length"]
 	while True:
 		found_value = env.sdm.read(address)
 		address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
 		hdiff = hamming(prev_address, address)
+		if hdiff < best_hdiff:
+			best_address = address
+			best_found_value = found_value
 		hconverge.append(hdiff)
 		f_non_zero = np.count_nonzero(found_value) / len(found_value)
 		if hdiff == 0:
@@ -1049,7 +1053,7 @@ def converge(env, address, pb_len):
 	# if debug:
 	# 	print(" found_value = %s" % bina2str(found_value))
 	# 	print(" created address used to start reading sequence:\n %s" % bina2str(address))
-	return [address, f_non_zero, found_value]
+	return [best_address, f_non_zero, best_found_value]
 
 
 
