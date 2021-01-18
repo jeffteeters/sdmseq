@@ -317,12 +317,6 @@ def seeded_shuffle(b, seed, inverse=False):
 	return shuffled
 
 
-def wh_shuffle_old(b, seed, wh_len, inverse=False):
-	# perform a seeded shuffle on b[0:wh_len], leaving the part after that unchanged
-	wh_part = seeded_shuffle(b[0:wh_len], seed, inverse)
-	return np.concatenate((wh_part, b[wh_len:]))
-
-
 
 class Merge_algorithm():
 	# Abstract class for algorithms used for creating address and data to store and recall sequences
@@ -1144,113 +1138,6 @@ def converge(env, address, pb_len, shuf):
 	return [best_address, f_non_zero, best_found_value]
 
 
-def converge_orig2(env, address, pb_len, bchar, shuf):
-	# converge address by reapeat reading so bits after pb_len match bits read from memory
-	# if shuf is True, do seeded_shuffle using bchar
-	word_length = env.pvals["word_length"]
-	assert len(address) == word_length
-	hconverge=[]
-	seed_count = 1
-	max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
-	seed = address
-	best_hdiff = word_length
-	if shuf:
-		# make mask to indicate which bits are known, which are not
-		# also shuffle wh part of address
-		wh_len = env.ma.pvals["wh_len"]
-		xr_len = env.ma.pvals["xr_len"]
-		wh_mask = np.full(wh_len, 0, dtype=np.int8)
-		wh_mask[0:pb_len] = 1
-		wh_mask = seeded_shuffle(wh_mask, bchar)
-		xr_mask = np.full(xr_len, 0, dtype=np.int8)
-		keep_mask = np.concatenate((wh_mask, xr_mask))
-		wh_part = seeded_shuffle(address[0:wh_len], bchar)
-		xr_part = address[wh_len:]
-		address = np.concatenate((wh_part, xr_part))
-	else:
-		# no shuffle, known_mask is just covering first pb_len bits
-		keep_mask = np.full(word_length, 0, dtype=np.int8)
-		keep_mask[0:pb_len] = 1
-	chng_mask = 1 - keep_mask
-	fixed_address = np.bitwise_and(address, keep_mask)
-	prev_address = address
-	while True:
-		found_value = env.sdm.read(address)
-		address = np.bitwise_or(fixed_address, np.bitwise_and(found_value, chng_mask))
-		# address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
-		hdiff = hamming(prev_address, address)
-		if hdiff < best_hdiff:
-			best_address = address
-			best_found_value = found_value
-		hconverge.append(hdiff)
-		f_non_zero = np.count_nonzero(found_value) / len(found_value)
-		if hdiff == 0:
-			print("Seed %s,iterative converged in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count,
-				len(hconverge), f_non_zero, hconverge))
-			break
-		if len(hconverge) > max_steps:
-			print("Seed %s, did not converge in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count, len(hconverge),
-				f_non_zero, hconverge))
-			if seed_count >= max_seeds:
-				print("Converge failed after %s seeds" % seed_count)
-				break
-			seed_count += 1
-			hconverge=[]
-			# make a new seed for next convergence attempt
-			seed = np.bitwise_xor(np.roll(seed, 1), seed)
-			# address =  np.concatenate((address[0:pb_len], seed[pb_len:]))
-			address = np.bitwise_or(fixed_address, np.bitwise_and(seed, chng_mask))
-		prev_address = address
-	if shuf:
-		# need to unshuffle address before returning
-		wh_part = seeded_shuffle(best_address[0:wh_len], bchar, inverse=True)
-		xr_part = best_address[wh_len:]
-		best_address = np.concatenate((wh_part, xr_part))
-	return [best_address, f_non_zero, best_found_value]
-
-def converge_orig(env, address, pb_len):
-	# converge address by reapeat reading so bits after pb_len match bits read from memory
-	prev_address = address
-	hconverge=[]
-	seed_count = 1
-	max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
-	seed = address
-	best_hdiff = env.pvals["word_length"]
-	while True:
-		found_value = env.sdm.read(address)
-		address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
-		hdiff = hamming(prev_address, address)
-		if hdiff < best_hdiff:
-			best_address = address
-			best_found_value = found_value
-		hconverge.append(hdiff)
-		f_non_zero = np.count_nonzero(found_value) / len(found_value)
-		if hdiff == 0:
-			print("Seed %s,iterative converged in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count,
-				len(hconverge), f_non_zero, hconverge))
-			break
-		if len(hconverge) > max_steps:
-			print("Seed %s, did not converge in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count, len(hconverge),
-				f_non_zero, hconverge))
-			if seed_count >= max_seeds:
-				print("Converge failed after %s seeds" % seed_count)
-				break
-			seed_count += 1
-			hconverge=[]
-			# make a new seed for next convergence attempt
-			seed = np.bitwise_xor(np.roll(seed, 1), seed)
-			address =  np.concatenate((address[0:pb_len], seed[pb_len:]))
-		prev_address = address
-	# if f_non_zero < 0.1:
-	# 	print("Failed to converge to valid data (found_value near zero)")
-	# 	return [found, word2]
-
-	# if debug:
-	# 	print(" found_value = %s" % bina2str(found_value))
-	# 	print(" created address used to start reading sequence:\n %s" % bina2str(address))
-	return [best_address, f_non_zero, best_found_value]
-
-
 def recall(prefix, env, reverse=False):
 	# recall sequence starting with prefix
 	# build address to start searching
@@ -1330,77 +1217,6 @@ def recall(prefix, env, reverse=False):
 	return [found, word2]
 
 
-def recall_orig(prefix, env, reverse=False):
-	# recall sequence starting with prefix
-	# build address to start searching
-	# reverse is True to search in reverse
-	if reverse and len(prefix) == 1:
-		return [ ["Error: cannot reverse recall with one char",], prefix]
-	word_length = env.pvals["word_length"]
-	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
-	ma = env.pvals["merge_algorithm"]
-	if ma == "wx2":
-		wh_len = env.ma.pvals["wh_len"]
-		item_len = env.ma.pvals["item_len"]
-	debug = env.pvals["debug"]
-	# create initial address from prefix
-	address = env.ma.make_initial_address(env.cmap.char2bin(prefix[0])) # env.cmap.char2bin(prefix[0])
-	for char in prefix[1:]:
-		address = env.ma.make_new_address(address, env.cmap.char2bin(char))
-	# address = env.cmap.char2bin(prefix[0])
-	# for char in prefix:
-	# 	address = env.ma.make_new_address(address, env.cmap.char2bin(char))
-	if not reverse:
-		found = [ prefix, ]
-		word2 = prefix
-	else:
-		# for reverse, don't include prefix since it will be recalled in reverse
-		found = []
-		word2 = ""
-	if ma  == "wx2" and len(prefix) > 1:
-		# iteratively read value at address until converges (no decrease in hamming distance between xor part in
-		# address and prev_address)
-		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
-		# max_converge_trys = 10
-		address, f_non_zero, found_value = converge(env, address, pb_len)
-		if f_non_zero < 0.1:
-			print("Failed to converge to valid data (found_value near zero)")
-			return [found, word2]
-		if debug:
-			print(" found_value = %s" % bina2str(found_value))
-			print(" created address used to start reading sequence:\n %s" % bina2str(address))
-	computed_address = address
-	# now read sequence using address derived from prefix
-	while True:
-		value = env.sdm.read(address)
-		new_address, found_char, top_matches = env.ma.prev(address, value) if reverse else env.ma.next(address, value)
-		found.append(top_matches)
-		if reverse:
-			word2 = found_char + word2
-		if new_address is None or len(word2) > max_num_recalled_chars:
-			break
-		if not reverse:
-			word2 += found_char
-		diff = np.count_nonzero(address!=new_address)
-		found[-1].append("addr_diff=%s" % diff)
-		if diff == 0:
-			found[-1].append("found fixed point in address")
-			break
-		if ma == "wx2":
-			recalled_xor_part = value[wh_len:]
-			address_xor_part = address[wh_len:]
-			computed_xor_part = computed_address[wh_len:]
-			xor_hamming = " xorh cv=%s, av=%s" % (
-				hamming(computed_xor_part, recalled_xor_part), hamming(recalled_xor_part,address_xor_part))
-			found[-1].append(xor_hamming)
-			if not reverse:
-				computed_address = env.ma.make_new_address(computed_address, env.cmap.char2bin(found_char))
-			else:
-				computed_address = env.ma.make_reverse_address(computed_address, value, found_char, top_matches)
-		address = new_address
-	return [found, word2]
-
-
 def store_strings(env, strings):
 	# debug = env.pvals["debug"] == 1
 	ma = env.pvals["merge_algorithm"]
@@ -1429,23 +1245,6 @@ def store_strings(env, strings):
 			address = new_address
 		env.record_saved_string(string)
 
-def store_strings_orig(env, strings):
-	# debug = env.pvals["debug"] == 1
-	for string in strings:
-		print("storing '%s'" % string)
-		address = env.ma.make_initial_address(env.cmap.char2bin(string[0]))
-		bchar1 = env.cmap.char2bin(string[1])
-		value = env.ma.make_initial_value(address, bchar1)
-		env.sdm.store(address, value)
-		strpstop = string+"#"
-		for cindex in range(2, len(strpstop)):
-			bchar2 = env.cmap.char2bin(strpstop[cindex])
-			new_address = env.ma.make_new_address(address, bchar1)
-			new_value = env.ma.make_new_value(address, new_address, bchar2, cindex)
-			env.sdm.store(new_address, new_value)
-			bchar1 = bchar2
-			address = new_address
-		env.record_saved_string(string)
 
 def test_merge_convergence(env):
 	# test how fast address for substring converges to address for full string
