@@ -305,8 +305,9 @@ def seeded_shuffle(b, seed, inverse=False):
 	indices = list(range(blen))
 	wl = blen.bit_length()
 	shuffled_indices = np.full(blen, -1, dtype=np.int32)
+	slen = len(seed)
 	for i in range(blen):
-		sidx = "".join([str(seed[(i*wl+j)%blen]) for j in range(wl)])
+		sidx = "".join([str(seed[(i*wl+j)%slen]) for j in range(wl)])
 		idx = int(sidx, 2)  # convert binary string to int, e.g. "0110" ==> 6
 		idx = idx % len(indices)  # put in range to indicies
 		shuffled_indices[i] = indices.pop(idx)
@@ -316,10 +317,11 @@ def seeded_shuffle(b, seed, inverse=False):
 	return shuffled
 
 
-def wh_shuffle(b, seed, wh_len, inverse=False):
+def wh_shuffle_old(b, seed, wh_len, inverse=False):
 	# perform a seeded shuffle on b[0:wh_len], leaving the part after that unchanged
 	wh_part = seeded_shuffle(b[0:wh_len], seed, inverse)
 	return np.concatenate((wh_part, b[wh_len:]))
+
 
 
 class Merge_algorithm():
@@ -687,6 +689,26 @@ class Ma_wx2(Ma_wx):
 					top_matches, char))
 			found = char + found
 		return "[" + found + "]"
+
+	def make_shuffle_seed(self, address):
+		# seed for shuffle made from first two bins
+		assert self.env.pvals["first_bin_fraction"] > 2, "seeded_shuffle option for wx2 requires at least 3 bins of equal size"
+		item_len = self.pvals["item_len"]
+		seed_part1 = address[0:item_len]
+		seed_part2 = address[item_len:2*item_len]
+		# following from https://stackoverflow.com/questions/17619415/how-do-i-combine-two-numpy-arrays-element-wise-in-python
+		seed = np.insert(seed_part2, np.arange(item_len), seed_part1)
+		return seed
+
+	def wh_shuffle(self, address):
+		# scramble history bins (wh_part) of address using first two bins as seed
+		seed = self.make_shuffle_seed(address)
+		wh_len = self.pvals["wh_len"]
+		wh_part = address[0:wh_len]
+		xr_part = address[wh_len:]
+		shuffled_wh = seeded_shuffle(wh_part, seed)
+		shuffled_address = np.concatenate((shuffled_wh, xr_part))
+		return shuffled_address
 
 
 class Ma_fl(Merge_algorithm):
@@ -1056,7 +1078,73 @@ def hamming(b1, b2):
 	ndiff = np.count_nonzero(b1!=b2)
 	return ndiff
 
-def converge(env, address, pb_len, bchar, shuf):
+def converge(env, address, pb_len, shuf):
+	# converge address by reapeat reading so bits after pb_len match bits read from memory
+	# if shuf is True, shuffle wh_part of address for convergence, then unshuffle
+	word_length = env.pvals["word_length"]
+	assert len(address) == word_length
+	hconverge=[]
+	seed_count = 1
+	max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
+	seed = address
+	best_hdiff = word_length
+	if shuf:
+		# make mask to indicate which bits are known, which are not
+		# also shuffle wh part of address
+		shuf_seed = env.ma.make_shuffle_seed(address)
+		wh_len = env.ma.pvals["wh_len"]
+		xr_len = env.ma.pvals["xr_len"]
+		wh_mask = np.full(wh_len, 0, dtype=np.int8)
+		wh_mask[0:pb_len] = 1
+		wh_mask = seeded_shuffle(wh_mask, shuf_seed)
+		xr_mask = np.full(xr_len, 0, dtype=np.int8)
+		keep_mask = np.concatenate((wh_mask, xr_mask))
+		wh_part = seeded_shuffle(address[0:wh_len], shuf_seed)
+		xr_part = address[wh_len:]
+		address = np.concatenate((wh_part, xr_part))
+	else:
+		# no shuffle, known_mask is just covering first pb_len bits
+		keep_mask = np.full(word_length, 0, dtype=np.int8)
+		keep_mask[0:pb_len] = 1
+	chng_mask = 1 - keep_mask
+	fixed_address = np.bitwise_and(address, keep_mask)
+	prev_address = address
+	while True:
+		found_value = env.sdm.read(address)
+		address = np.bitwise_or(fixed_address, np.bitwise_and(found_value, chng_mask))
+		# address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+		hdiff = hamming(prev_address, address)
+		if hdiff < best_hdiff:
+			best_address = address
+			best_found_value = found_value
+		hconverge.append(hdiff)
+		f_non_zero = np.count_nonzero(found_value) / len(found_value)
+		if hdiff == 0:
+			print("Seed %s,iterative converged in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count,
+				len(hconverge), f_non_zero, hconverge))
+			break
+		if len(hconverge) > max_steps:
+			print("Seed %s, did not converge in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count, len(hconverge),
+				f_non_zero, hconverge))
+			if seed_count >= max_seeds:
+				print("Converge failed after %s seeds" % seed_count)
+				break
+			seed_count += 1
+			hconverge=[]
+			# make a new seed for next convergence attempt
+			seed = np.bitwise_xor(np.roll(seed, 1), seed)
+			# address =  np.concatenate((address[0:pb_len], seed[pb_len:]))
+			address = np.bitwise_or(fixed_address, np.bitwise_and(seed, chng_mask))
+		prev_address = address
+	if shuf:
+		# need to unshuffle address before returning
+		wh_part = seeded_shuffle(best_address[0:wh_len], shuf_seed, inverse=True)
+		xr_part = best_address[wh_len:]
+		best_address = np.concatenate((wh_part, xr_part))
+	return [best_address, f_non_zero, best_found_value]
+
+
+def converge_orig2(env, address, pb_len, bchar, shuf):
 	# converge address by reapeat reading so bits after pb_len match bits read from memory
 	# if shuf is True, do seeded_shuffle using bchar
 	word_length = env.pvals["word_length"]
@@ -1201,7 +1289,7 @@ def recall(prefix, env, reverse=False):
 		# address and prev_address)
 		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
 		# max_converge_trys = 10
-		address, f_non_zero, found_value = converge(env, address, pb_len, bchar, shuf)
+		address, f_non_zero, found_value = converge(env, address, pb_len, shuf)
 		if f_non_zero < 0.1:
 			print("Failed to converge to valid data (found_value near zero)")
 			return [found, word2]
@@ -1211,7 +1299,7 @@ def recall(prefix, env, reverse=False):
 	computed_address = address
 	# now read sequence using address derived from prefix
 	while True:
-		shuffle_address = wh_shuffle(address, bchar, wh_len) if shuf else address
+		shuffle_address = env.ma.wh_shuffle(address) if shuf else address
 		value = env.sdm.read(shuffle_address)
 		new_address, found_char, top_matches = env.ma.prev(address, value) if reverse else env.ma.next(address, value)
 		found.append(top_matches)
@@ -1324,8 +1412,8 @@ def store_strings(env, strings):
 		print("storing '%s'" % string)
 		address = env.ma.make_initial_address(env.cmap.char2bin(string[0]))
 		bchar1 = env.cmap.char2bin(string[1])
-		shuffled_address = wh_shuffle(address, bchar1, wh_len) if shuf else address
-		value = env.ma.make_initial_value(shuffled_address, bchar1)
+		shuffled_address = env.ma.wh_shuffle(address) if shuf else address
+		value = env.ma.make_initial_value(address, bchar1)
 		if debug:
 			print("string[0]='%s', string[1]='%s'\naddress='%s', bchar1='%s'\nshufadd='%s'\n  value='%s'" %
 				(string[0], string[1], bina2str(address), bina2str(bchar1), bina2str(shuffled_address), bina2str(value)))
@@ -1334,7 +1422,7 @@ def store_strings(env, strings):
 		for cindex in range(2, len(strpstop)):
 			bchar2 = env.cmap.char2bin(strpstop[cindex])
 			new_address = env.ma.make_new_address(address, bchar1)
-			shuffled_address = wh_shuffle(new_address, bchar1, wh_len) if shuf else new_address
+			shuffled_address = env.ma.wh_shuffle(new_address) if shuf else new_address
 			new_value = env.ma.make_new_value(address, shuffled_address, bchar2, cindex)
 			env.sdm.store(shuffled_address, new_value)
 			bchar1 = bchar2
