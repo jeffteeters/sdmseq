@@ -46,6 +46,8 @@ class Env:
 	 	  "required_init":"", "default":"30,30"},
 	 	{ "name":"seeded_shuffle", "kw":{"help":"Shuffle history part using seed (wx2 algorithm), 1-yes, 0-no",
 	 	  "type":int, "choices":[0, 1]},"flag":"ss", "required_init":"m", "default":0},
+	 	{ "name":"recall_fix", "kw":{"help":"Fix errors when recalling sequence (wx2 algorithm), 1-yes, 0-no",
+	 	  "type":int, "choices":[0, 1]},"flag":"rf", "required_init":"", "default":0},
 	 	{ "name":"debug", "kw":{"help":"Debug mode","type":int, "choices":[0, 1]},
 		   "flag":"d", "required_init":"", "default":0},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "required_init":"",
@@ -360,7 +362,7 @@ class Merge_algorithm():
 		# get next address and character in sequence
 		# given address and value at that address, return [new_address, char, top_matches] character in sequence
 		bchar1_part = self.get_bchar1_part(value)
-		top_matches = self.env.cmap.bin2char(bchar1_part, match_bits=len(bchar1_part))
+		top_matches = self.env.cmap.bin2char(bchar1_part, nret=6, match_bits=len(bchar1_part))
 		char = top_matches[0][0]
 		if char == "#" or top_matches[0][1] > int(self.env.pvals["char_match_fraction"] * len(bchar1_part)):
 			# found stop char, or hamming distance to top match is over threshold
@@ -1138,7 +1140,133 @@ def converge(env, address, pb_len, shuf):
 	return [best_address, f_non_zero, best_found_value]
 
 
+def try_alternate(env, prev_address, alt_chars, shuf, reverse, xr_thresh):
+	# try alternate characters for continuing sequence
+	assert reverse is False, "try_alternate not implemented for reverse recall"
+	wh_len = env.ma.pvals["wh_len"]
+	for ch in alt_chars:
+		assert not isinstance(ch, str), "expecting tuple, found str: %s" % ch
+		char, hdist = ch
+		bchar = env.cmap.char2bin(char)
+		address = env.ma.make_new_address(prev_address, bchar)
+		shuffle_address = env.ma.wh_shuffle(address) if shuf else address
+		value = env.sdm.read(shuffle_address)
+		recalled_xor_part = value[wh_len:]
+		address_xor_part = address[wh_len:]
+		xor_hamming = hamming(recalled_xor_part,address_xor_part)
+		if xor_hamming < xr_thresh:
+			msg = "fixed to '%s'" % char
+			return (address, value, char, msg)
+	# didn't find alternate
+	msg = "alt search failed."
+	return (None, None, None, msg)
+
+
 def recall(prefix, env, reverse=False):
+	# recall sequence starting with prefix
+	# build address to start searching
+	# reverse is True to search in reverse
+	if reverse and len(prefix) == 1:
+		return [ ["Error: cannot reverse recall with one char",], prefix]
+	word_length = env.pvals["word_length"]
+	max_num_recalled_chars = len(max(env.saved_strings, key=len)) + 5
+	ma = env.pvals["merge_algorithm"]
+	if ma == "wx2":
+		wh_len = env.ma.pvals["wh_len"]
+		item_len = env.ma.pvals["item_len"]
+		xr_len = env.ma.pvals["xr_len"]
+		prev_address = None
+		xr_thresh = int(env.pvals["char_match_fraction"] * xr_len)
+	shuf = ma == "wx2" and env.pvals["seeded_shuffle"] == 1
+	rfix = ma == "wx2" and env.pvals["recall_fix"] == 1
+	debug = env.pvals["debug"] == 1
+	# create initial address from prefix
+	bchar = env.cmap.char2bin(prefix[0])
+	address = env.ma.make_initial_address(bchar)
+	for char in prefix[1:]:
+		bchar = env.cmap.char2bin(char)
+		address = env.ma.make_new_address(address, bchar)
+	if debug:
+		print("prefix[0]='%s'\nbchar='%s'\naddress='%s'" % (prefix[0], bina2str(bchar), bina2str(address)))
+
+	# address = env.cmap.char2bin(prefix[0])
+	# for char in prefix:
+	# 	address = env.ma.make_new_address(address, env.cmap.char2bin(char))
+	if not reverse:
+		found = [ prefix, ]
+		word2 = prefix
+	else:
+		# for reverse, don't include prefix since it will be recalled in reverse
+		found = []
+		word2 = ""
+	if ma  == "wx2" and len(prefix) > 1:
+		# iteratively read value at address until converges (no decrease in hamming distance between xor part in
+		# address and read value)
+		pb_len = sum(env.ma.pvals["bin_sizes"][0:len(prefix)]) # number prefix bits
+		# max_converge_trys = 10
+		address, f_non_zero, found_value = converge(env, address, pb_len, shuf)
+		if f_non_zero < 0.1:
+			print("Failed to converge to valid data (found_value near zero)")
+			return [found, word2]
+		if debug:
+			print(" found_value = %s" % bina2str(found_value))
+			print(" created address used to start reading sequence:\n %s" % bina2str(address))
+	# now read sequence using address derived from prefix
+	while True:
+		msg = []
+		shuffle_address = env.ma.wh_shuffle(address) if shuf else address
+		value = env.sdm.read(shuffle_address)
+		if ma == "wx2":
+			recalled_xor_part = value[wh_len:]
+			address_xor_part = address[wh_len:]
+			xor_hamming = hamming(recalled_xor_part,address_xor_part)
+			msg.append("xorh=%s" % xor_hamming)
+			if rfix and prev_address is not None and xor_hamming > xr_thresh and not reverse:
+				# not implemented for reverse
+				# hamming distance is greater than threshold, backtrack and try alternate characters
+				alt_address, alt_value, alt_char, alt_msg = try_alternate(env, prev_address, found[-1][1:-1], shuf, reverse, xr_thresh)
+				if alt_address is not None:
+					address = alt_address
+					value = alt_value
+					word2 = word2[0:-1] + alt_char
+				msg.append(">xr_thresh(%s): %s" % (xr_thresh, alt_msg))
+		new_address, found_char, top_matches = env.ma.prev(address, value) if reverse else env.ma.next(address, value)
+		found.append(top_matches)
+		if reverse:
+			word2 = found_char + word2
+		if new_address is None or len(word2) > max_num_recalled_chars:
+			break
+		if not reverse:
+			word2 += found_char
+		diff = np.count_nonzero(address!=new_address)
+		msg.insert(0,"addr_diff=%s" % diff)  # insert at beginning of messages
+		if diff == 0:
+			msg.append("found fixed point in address")
+			break
+		if ma == "wx2":
+			# recalled_xor_part = value[wh_len:]
+			# address_xor_part = address[wh_len:]
+			# xor_hamming = "xorh=%s" % hamming(recalled_xor_part,address_xor_part)
+			prev_address = address
+			prev_value = value
+		address = new_address
+		if msg:
+			found[-1].append(", ".join(msg))
+			msg = []
+	if msg:
+		found[-1].append(", ".join(msg))
+	found2 = []
+	for item in found:
+		if isinstance(item, str):
+			found2.append(item)
+		else:
+			chars = " ".join(["'%s'%s" % (p[0], p[1]) for p in item[0:-1]])
+			msgs = " %s" % item[-1] if len(item) > 1 and isinstance(item[-1], str) else ""
+			found2.append("%s%s" % (chars, msgs))
+	return [found2, word2]
+
+
+def recall_orig(prefix, env, reverse=False):
 	# recall sequence starting with prefix
 	# build address to start searching
 	# reverse is True to search in reverse
@@ -1202,6 +1330,7 @@ def recall(prefix, env, reverse=False):
 			found[-1].append("found fixed point in address")
 			break
 		if ma == "wx2":
+			assert hamming(address, computed_address) == 0
 			recalled_xor_part = value[wh_len:]
 			address_xor_part = address[wh_len:]
 			computed_xor_part = computed_address[wh_len:]
@@ -1215,7 +1344,6 @@ def recall(prefix, env, reverse=False):
 				computed_address = env.ma.make_reverse_address(computed_address, value, found_char, top_matches)
 		address = new_address
 	return [found, word2]
-
 
 def store_strings(env, strings):
 	# debug = env.pvals["debug"] == 1
