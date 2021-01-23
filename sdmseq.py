@@ -43,8 +43,8 @@ class Env:
 	 	{ "name":"converge_count", "kw":{"help":"Converge count for wx2; format: <int1>,<int2>; <int1> number of reads to converge "
 	 	  "for each seed addresss, <int2> number of seeds to try", "type":str}, "flag":"cvc",
 	 	  "required_init":"", "default":"30,30"},
-	 	{ "name":"seeded_shuffle", "kw":{"help":"Shuffle history part using seed (wx2 algorithm), 1-yes, 0-no",
-	 	  "type":int, "choices":[0, 1]},"flag":"ss", "required_init":"m", "default":0},
+	 	{ "name":"seeded_shuffle", "kw":{"help":"Shuffle history part using seed (wx2 algorithm), 1-yes, 0-no, 2-new method",
+	 	  "type":int, "choices":[0, 1, 2]},"flag":"ss", "required_init":"m", "default":0},
 	 	{ "name":"recall_fix", "kw":{"help":"Fix errors when recalling sequence (wx2 algorithm), 1-yes, 0-no",
 	 	  "type":int, "choices":[0, 1]},"flag":"rf", "required_init":"", "default":0},
 	 	{ "name":"min_key_length", "kw":{"help":"minimum length of key string recalling (wx2 algorithm), must be >1",
@@ -770,6 +770,12 @@ class Ma_wx2(Ma_wx):
 		return seed
 
 	def wh_shuffle(self, address):
+		if self.env.pvals["seeded_shuffle"] == 1:
+			return self.wh_shuffle_v1(address)
+		else:
+			return self.wh_shuffle_v2(address)
+
+	def wh_shuffle_v1(self, address):
 		# scramble history bins (wh_part) of address using first two bins as seed
 		seed = self.make_shuffle_seed(address)
 		wh_len = self.pvals["wh_len"]
@@ -779,9 +785,25 @@ class Ma_wx2(Ma_wx):
 		shuffled_address = np.concatenate((shuffled_wh, xr_part))
 		return shuffled_address
 
-	def test_wh_shuffle(self, address):
-		pass:
+	def wh_shuffle_v2(self, address):
+		# scramble history bins (wh_part) of address using first two bins as seed
+		seed = self.make_shuffle_seed(address)
+		return self.ku_shuffle(address, seed)
 
+
+	def ku_shuffle(self, address, seed, inverse=False):
+		# shuffle known part and unknown part with same seed
+		wh_len = self.pvals["wh_len"]
+		item_len = self.pvals["item_len"]
+		mkl = self.env.pvals["min_key_length"]
+		kk_len = mkl * item_len  # known key
+		kk_part = address[0:kk_len]  # unknown key (char's might not be present)
+		uk_part = address[kk_len:wh_len]
+		shuffled_kk = seeded_shuffle(kk_part, seed, inverse)
+		shuffled_uk = seeded_shuffle(uk_part, seed, inverse)
+		xr_part = address[wh_len:]
+		shuffled_address = np.concatenate((shuffled_kk, shuffled_uk, xr_part))
+		return shuffled_address
 
 class Ma_fl(Merge_algorithm):
 
@@ -1163,17 +1185,31 @@ def converge(env, address, pb_len, shuf):
 	if shuf:
 		# make mask to indicate which bits are known, which are not
 		# also shuffle wh part of address
-		shuf_seed = env.ma.make_shuffle_seed(address)
-		wh_len = env.ma.pvals["wh_len"]
-		xr_len = env.ma.pvals["xr_len"]
-		wh_mask = np.full(wh_len, 0, dtype=np.int8)
-		wh_mask[0:pb_len] = 1
-		wh_mask = seeded_shuffle(wh_mask, shuf_seed)
-		xr_mask = np.full(xr_len, 0, dtype=np.int8)
-		keep_mask = np.concatenate((wh_mask, xr_mask))
-		wh_part = seeded_shuffle(address[0:wh_len], shuf_seed)
-		xr_part = address[wh_len:]
-		address = np.concatenate((wh_part, xr_part))
+		if env.pvals["seeded_shuffle"] == 1:
+			# version 1 of seeded shuffle (I think does not work correctly)
+			shuf_seed = env.ma.make_shuffle_seed(address)
+			wh_len = env.ma.pvals["wh_len"]
+			xr_len = env.ma.pvals["xr_len"]
+			wh_mask = np.full(wh_len, 0, dtype=np.int8)
+			wh_mask[0:pb_len] = 1
+			wh_mask = seeded_shuffle(wh_mask, shuf_seed)
+			xr_mask = np.full(xr_len, 0, dtype=np.int8)
+			keep_mask = np.concatenate((wh_mask, xr_mask))
+			wh_part = seeded_shuffle(address[0:wh_len], shuf_seed)
+			xr_part = address[wh_len:]
+			address = np.concatenate((wh_part, xr_part))
+		else:
+			# version 2 - new and improved
+			shuf_seed = env.ma.make_shuffle_seed(address)
+			wh_len = env.ma.pvals["wh_len"]
+			xr_len = env.ma.pvals["xr_len"]
+			wh_mask = np.full(wh_len, 0, dtype=np.int8)
+			wh_mask[0:pb_len] = 1
+			xr_mask = np.full(xr_len, 0, dtype=np.int8)
+			keep_mask = env.ma.ku_shuffle(np.concatenate((wh_mask, xr_mask)), shuf_seed)
+			address = env.ma.ku_shuffle(address, shuf_seed)
+		assert len(keep_mask) == word_length
+		assert len(address) == word_length
 	else:
 		# no shuffle, known_mask is just covering first pb_len bits
 		keep_mask = np.full(word_length, 0, dtype=np.int8)
@@ -1210,9 +1246,13 @@ def converge(env, address, pb_len, shuf):
 		prev_address = address
 	if shuf:
 		# need to unshuffle address before returning
-		wh_part = seeded_shuffle(best_address[0:wh_len], shuf_seed, inverse=True)
-		xr_part = best_address[wh_len:]
-		best_address = np.concatenate((wh_part, xr_part))
+		if env.pvals["seeded_shuffle"] == 1:
+			wh_part = seeded_shuffle(best_address[0:wh_len], shuf_seed, inverse=True)
+			xr_part = best_address[wh_len:]
+			best_address = np.concatenate((wh_part, xr_part))
+		else:
+			# version 2
+			best_address = env.ma.ku_shuffle(best_address, shuf_seed, inverse=True)
 	return [best_address, f_non_zero, best_found_value]
 
 
@@ -1253,7 +1293,7 @@ def recall(prefix, env, reverse=False):
 		xr_len = env.ma.pvals["xr_len"]
 		prev_address = None
 		xr_thresh = int(env.pvals["char_match_fraction"] * xr_len)
-	shuf = ma == "wx2" and env.pvals["seeded_shuffle"] == 1
+	shuf = ma == "wx2" and env.pvals["seeded_shuffle"] > 0
 	rfix = ma == "wx2" and env.pvals["recall_fix"] == 1
 	debug = env.pvals["debug"] == 1
 	# create initial address from prefix
@@ -1424,7 +1464,7 @@ def recall_orig(prefix, env, reverse=False):
 def store_strings(env, strings):
 	# debug = env.pvals["debug"] == 1
 	ma = env.pvals["merge_algorithm"]
-	shuf = ma == "wx2" and env.pvals["seeded_shuffle"] == 1
+	shuf = ma == "wx2" and env.pvals["seeded_shuffle"] > 0
 	debug = env.pvals["debug"] == 1
 	if shuf:
 		wh_len = env.ma.pvals["wh_len"]
