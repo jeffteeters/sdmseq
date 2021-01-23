@@ -38,9 +38,8 @@ class Env:
 	 	{ "name":"xor_fraction", "kw":{"help":"Fraction of bits used for xor component in wx algorithm","type":float},
 	 	  "flag":"xf", "required_init":"m", "default":0.5},
 	 	{ "name":"first_bin_fraction", "kw":{"help":"First bin fraction, fraction of bits of item used for first bin "
-	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins OR an integer + 0.5 to store "
-	 	  "reverse character in value (wx2 algorithm)", "type":float}, "flag":"fbf",
-	 	  "required_init":"m", "default":8},
+	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins (wx2 algorithm)",
+	 	  "type":float}, "flag":"fbf", "required_init":"m", "default":8},
 	 	{ "name":"converge_count", "kw":{"help":"Converge count for wx2; format: <int1>,<int2>; <int1> number of reads to converge "
 	 	  "for each seed addresss, <int2> number of seeds to try", "type":str}, "flag":"cvc",
 	 	  "required_init":"", "default":"30,30"},
@@ -48,6 +47,13 @@ class Env:
 	 	  "type":int, "choices":[0, 1]},"flag":"ss", "required_init":"m", "default":0},
 	 	{ "name":"recall_fix", "kw":{"help":"Fix errors when recalling sequence (wx2 algorithm), 1-yes, 0-no",
 	 	  "type":int, "choices":[0, 1]},"flag":"rf", "required_init":"", "default":0},
+	 	{ "name":"min_key_length", "kw":{"help":"minimum length of key string recalling (wx2 algorithm), must be >1",
+	 	  "type":int},"flag":"mkl", "required_init":"m", "default":3},
+	 	{ "name":"num_target_bins", "kw":{"help":"Num bins in value to use for next and prev chars (wx2 algorithm). "
+	 	     "Range 0 to min_key_length.  Zero means min_key_length (all).  Normally, should be all, but can be made "
+	 	     "smaller to cause errors to test recall_fix.", "type":int},"flag":"ntb", "required_init":"m", "default":0},
+	 	{ "name":"allow_reverse_recall", "kw":{"help":"Allow reverse recalling sequence (wx2 algorithm), 1-yes, 0-no",
+	 	  "type":int, "choices":[0, 1]},"flag":"rev", "required_init":"m", "default":0},
 	 	{ "name":"debug", "kw":{"help":"Debug mode","type":int, "choices":[0, 1]},
 		   "flag":"d", "required_init":"", "default":0},
 		{ "name":"string_to_store", "kw":{"help":"String to store","type":str,"nargs":'*'}, "required_init":"",
@@ -319,7 +325,6 @@ def seeded_shuffle(b, seed, inverse=False):
 	return shuffled
 
 
-
 class Merge_algorithm():
 	# Abstract class for algorithms used for creating address and data to store and recall sequences
 
@@ -381,7 +386,7 @@ class Merge_algorithm():
 			print("function 'prev' of merge_algorithm '%s' not implementd" % self.name)
 			return [None, None, None]
 		if not self.pvals["include_reverse_char"]:
-			print("include_reverse_char not set; to set it make first_bin_fraction integer + 0.5, (is now %s)" %
+			print("include_reverse_char not set; to set it make first_bin_fraction integer > 1 and 'enable_reverse' == 1 %s)" %
 				self.env.pvals["first_bin_fraction"])
 			return [None, None, None]
 		bchar0_part = self.get_bchar0_part(address)
@@ -442,8 +447,7 @@ class Ma_wx(Merge_algorithm):
 			# has two parts, new item bits, then history bits
 			# this code has a bug, may not work unless history_fraction == 0.5
 			fbf = self.env.pvals["first_bin_fraction"]  # fraction of wh_len used for first bin (bits from current item)
-			# include reverse character (for wx2 algorithm), indicated by fbf being integer>1 + .5
-			include_reverse_char = self.name == "wx2" and fbf > 1.0 and ((round(fbf * 10.0) % 10) == 5)
+			include_reverse_char = self.name == "wx2" and fbf > 1.0 and self.env.pvals["allow_reverse_recall"]
 			self.pvals.update( {"include_reverse_char": include_reverse_char} )
 			if fbf > 1.0:
 				# equal size bins
@@ -492,19 +496,32 @@ class Ma_wx(Merge_algorithm):
 				offset += bin_sizes[i-1]
 			assert len(ind) + bin0_len + xr_len == word_length, ("wx hist init mismatch, ind=%s, bin0_len=%s, xr_len=%s" %
 				(ind, bin0_len, xr_len))
-			print("wx2 init:")
+			print("wx init:")
 			print("item_len=%s" % bin0_len)
 			print("bin_sizes=%s" % bin_sizes)
 			print("hist_bits=%s" % ind)
 			self.pvals.update( {"hist_bits": ind, "item_len":bin0_len, "bin_sizes":bin_sizes})
-			if include_reverse_char:
-				# used for wx2 if allow reverse recall
-				last_char_position = sum(bin_sizes[0:-1])  # position of reverse character
-				len_item_part = round(bin0_len / 2.0)
-				len_reverse_part = bin0_len - len_item_part
-				empty_flag = self.env.cmap.char2bin("#")[0:len_reverse_part]  # bits for end of string character
-				self.pvals.update( {"last_char_position":last_char_position, "len_item_part":len_item_part,
-					"len_reverse_part":len_reverse_part, "empty_flag":empty_flag} )
+			if self.name == "wx2":
+				mkl = self.env.pvals["min_key_length"]
+				assert mkl > 1
+				ntb = self.env.pvals["num_target_bins"]
+				if ntb == 0:
+					ntb = mkl  # defalut value (all bins)
+				if ntb > mkl:
+					ntb = mkl  # cannot be more than available bins
+				targets_len = ntb * bin0_len
+				if include_reverse_char:
+					len_item_part = round(targets_len / 2.0)
+				else:
+					len_item_part = targets_len
+				len_reverse_part = targets_len - len_item_part
+				self.pvals.update( { "len_item_part":len_item_part, "len_reverse_part":len_reverse_part,
+					"targets_len":targets_len })
+				if include_reverse_char:
+					# used for wx2 if allow reverse recall
+					last_char_position = sum(bin_sizes[0:-1])  # position of reverse character
+					empty_flag = self.env.cmap.char2bin("#")[0:len_reverse_part]  # bits for end of string character
+					self.pvals.update( {"last_char_position":last_char_position, "empty_flag":empty_flag} )
 		self.pvals.update( {"wh_len":wh_len, "xr_len":xr_len})
 
 	# def add(self, address, value, char):
@@ -580,12 +597,12 @@ class Ma_wx2(Ma_wx):
 		# make value associated with initial address
 		assert self.name == "wx2"
 		if self.pvals["include_reverse_char"]:
-			item_input = np.concatenate((bchar2[0:self.pvals["len_item_part"]], self.pvals["empty_flag"]))
-			assert len(item_input) == self.pvals["item_len"]
+			targets = np.concatenate((bchar2[0:self.pvals["len_item_part"]], self.pvals["empty_flag"]))
 		else:
-			item_input = bchar2[0:self.pvals["item_len"]]
-		value = np.concatenate((item_input, address[self.pvals["item_len"]:]))
-		assert len(value) == self.env.pvals["word_length"]
+			targets = bchar2[0:self.pvals["len_item_part"]]
+		value = np.concatenate((targets, address[self.pvals["targets_len"]:]))
+		assert len(value) == self.env.pvals["word_length"], ("len(value)=%s, len(targets)==%s, len_item_part=%s,"
+			"targets_len=%s" % (len(value), len(targets), self.pvals["len_item_part"],self.pvals["targets_len"]))
 		return value
 
 	# def make_new_address_shuffel_draft(self, address, bchar1):
@@ -614,7 +631,7 @@ class Ma_wx2(Ma_wx):
 	def get_bchar1_part(self, value):
 		# get bits for <char_t+1> from value
 		assert self.name == "wx2"
-		bc1p_len = self.pvals["len_item_part"] if self.pvals["include_reverse_char"] else self.pvals["item_len"]
+		bc1p_len = self.pvals["len_item_part"]
 		return value[0:bc1p_len]
 
 	def get_bchar1(self, value):
@@ -624,6 +641,30 @@ class Ma_wx2(Ma_wx):
 		return bchar1
 
 	def make_new_value(self, address, new_address, bchar2, cindex):
+		# bchar2 is item to store in value (next character in sequence)
+		# cindex is 0-based index of bchar2 in the sequence.  It is used when filling in reverse char part of value
+		assert self.name == "wx2"
+		if self.pvals["include_reverse_char"]:
+			num_bins = len(self.pvals["bin_sizes"])
+			if cindex <= num_bins:
+				rev_part = self.pvals["empty_flag"]
+			else:
+				rev_bin_bits = address[self.pvals["last_char_position"]:self.pvals["wh_len"]]
+				rev_char, hdist = self.env.cmap.bin2char(rev_bin_bits, nret = 1, match_bits=len(rev_bin_bits))[0]
+				assert hdist == 0, "unable to lookup reverse character from last address bin, cindex=%s, hdist=%s" % (
+					cindex, hdist)
+				brev_char = self.env.cmap.char2bin(rev_char)
+				rev_part = brev_char[0:self.pvals["len_reverse_part"]]
+			fwd_part = bchar2[0:self.pvals["len_item_part"]]
+			target_input = np.concatenate((fwd_part, rev_part))
+		else:
+			target_input = bchar2[0:self.pvals["len_item_part"]]
+		new_value = np.concatenate((target_input, new_address[self.pvals["targets_len"]:]))
+		assert len(new_value) == self.env.pvals["word_length"]
+		return new_value
+
+
+	def make_new_value_orig(self, address, new_address, bchar2, cindex):
 		# bchar2 is item to store in value (next character in sequence)
 		# cindex is 0-based index of bchar2 in the sequence.  It is used when filling in reverse char part of value
 		assert self.name == "wx2"
@@ -640,13 +681,32 @@ class Ma_wx2(Ma_wx):
 		assert len(new_value) == self.env.pvals["word_length"]
 		return new_value
 
-
 	def get_bchar0_part(self, address):
 		# return bits of item_t0 (first bin of address in wx2 algorithm)
 		return address[0:self.pvals["item_len"]]
 
 
 	def make_reverse_address(self, address, value, char0, top_matches):
+		# if cannot find character matching reverse char, include that in "top_matches"
+		# char0 is char specified in first bin of address (most recent character in sequence)
+		# shift bins left, insert bits from reverse char (in value), unless it matches empty_flag
+		debug = self.env.pvals["debug"] == 1
+		rev_part = value[self.pvals["len_item_part"]:self.pvals["targets_len"]]
+		rev_top_matches = self.env.cmap.bin2char(rev_part, match_bits=len(rev_part))
+		rev_char, hdist = rev_top_matches[0]
+		if rev_char == "#":
+			# stop going back, remaining characters of sequence are in value bins
+			return None
+		brev_char = self.env.cmap.char2bin(rev_char)
+		item_len = self.pvals["item_len"]
+		wh_len = self.pvals["wh_len"]
+		hist_part = address[item_len:wh_len]
+		bchar0 = self.env.cmap.char2bin(char0)
+		xor_part = np.roll(np.bitwise_xor(address[wh_len:],bchar0[0:self.pvals["xr_len"]]),-1)
+		reverse_address = np.concatenate((hist_part, brev_char[0:item_len], xor_part))
+		return reverse_address
+
+	def make_reverse_address_orig(self, address, value, char0, top_matches):
 		# if cannot find character matching reverse char, include that in "top_matches"
 		# char0 is char specified in first bin of address (most recent character in sequence)
 		# shift bins left, insert bits from reverse char (in value), unless it matches empty_flag
@@ -687,6 +747,19 @@ class Ma_wx2(Ma_wx):
 		return "[" + found + "]"
 
 	def make_shuffle_seed(self, address):
+		# seed for shuffle made from first min_key_length bins
+		mkl = self.env.pvals["min_key_length"]
+		assert mkl > 1
+		item_len = self.pvals["item_len"]
+		pb_len = mkl * item_len
+		pb = address[0:pb_len]
+		# make seed by selecting first element of each row, then 2nd element of each row, ...
+		# equivalent to converting from row major to column major order
+		pb2d = np.reshape(pb, (mkl, item_len))
+		seed = pb2d.flatten('f')
+		return seed
+
+	def make_shuffle_seed_orig(self, address):
 		# seed for shuffle made from first two bins
 		assert self.env.pvals["first_bin_fraction"] > 2, "seeded_shuffle option for wx2 requires at least 3 bins of equal size"
 		item_len = self.pvals["item_len"]
@@ -705,6 +778,9 @@ class Ma_wx2(Ma_wx):
 		shuffled_wh = seeded_shuffle(wh_part, seed)
 		shuffled_address = np.concatenate((shuffled_wh, xr_part))
 		return shuffled_address
+
+	def test_wh_shuffle(self, address):
+		pass:
 
 
 class Ma_fl(Merge_algorithm):
@@ -1075,7 +1151,7 @@ def hamming(b1, b2):
 	return ndiff
 
 def converge(env, address, pb_len, shuf):
-	# converge address by reapeat reading so bits after pb_len match bits read from memory
+	# converge address by reapeat reading bits after pb_len match bits
 	# if shuf is True, shuffle wh_part of address for convergence, then unshuffle
 	word_length = env.pvals["word_length"]
 	assert len(address) == word_length
@@ -1406,9 +1482,17 @@ def store_param_strings(env):
 def recall_strings(env, strings, prefix_mode = False, reverse = False):
 	# recall list of strings starting with first character of each
 	# if prefix_mode is True, use entire string as prefix for recall
-	if reverse and not prefix_mode:
-		print("reverse recall not allowed with just first char of string")
+	if len(env.saved_strings) < len(strings):
+		print("Cannot recall %s strings because %s strings are stored" % (len(strings), len(env.saved_strings)))
 		return
+	if reverse:
+		if not prefix_mode:
+			print("reverse recall not allowed with just first char of string")
+			return
+		if env.pvals["merge_algorithm"] != "wx2" or not env.ma.pvals["include_reverse_char"]:
+			print("Reverse recall is not enabled.  Requries: wx2 merge_algorithm, "
+				"first_bin_fraction > 1 and allow_reverse_recall == 1")
+			return
 	error_count = 0
 	for word in strings:
 		print ("\nRecall '%s'" % word)
