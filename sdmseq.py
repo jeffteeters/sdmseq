@@ -36,7 +36,7 @@ class Env:
 	 	    "(Both wx and fl algorighms)", "type":float},
 	 	    "flag":"hf", "required_init":"m", "default":0.5},
 	 	{ "name":"xor_fraction", "kw":{"help":"Fraction of bits used for xor component in wx algorithm","type":float},
-	 	  "flag":"xf", "required_init":"m", "default":0.5},
+	 	  "flag":"xf", "required_init":"m", "default":0.25},
 	 	{ "name":"first_bin_fraction", "kw":{"help":"First bin fraction, fraction of bits of item used for first bin "
 	 	  "in wx algorithm OR an integer > 1 giving number of equal history bins (wx2 algorithm)",
 	 	  "type":float}, "flag":"fbf", "required_init":"m", "default":8},
@@ -44,11 +44,11 @@ class Env:
 	 	  "for each seed addresss, <int2> number of seeds to try", "type":str}, "flag":"cvc",
 	 	  "required_init":"", "default":"30,30"},
 	 	{ "name":"seeded_shuffle", "kw":{"help":"Shuffle history part using seed (wx2 algorithm), 1-yes, 0-no, 2-new method",
-	 	  "type":int, "choices":[0, 1, 2]},"flag":"ss", "required_init":"m", "default":0},
+	 	  "type":int, "choices":[0, 1, 2]},"flag":"ss", "required_init":"m", "default":2},
 	 	{ "name":"recall_fix", "kw":{"help":"Fix errors when recalling sequence (wx2 algorithm), 1-yes, 0-no",
 	 	  "type":int, "choices":[0, 1]},"flag":"rf", "required_init":"", "default":0},
 	 	{ "name":"min_key_length", "kw":{"help":"minimum length of key string recalling (wx2 algorithm), must be >1",
-	 	  "type":int},"flag":"mkl", "required_init":"m", "default":3},
+	 	  "type":int},"flag":"mkl", "required_init":"m", "default":4},
 	 	{ "name":"num_target_bins", "kw":{"help":"Num bins in value to use for next and prev chars (wx2 algorithm). "
 	 	     "Range 0 to min_key_length.  Zero means min_key_length (all).  Normally, should be all, but can be made "
 	 	     "smaller to cause errors to test recall_fix.", "type":int},"flag":"ntb", "required_init":"m", "default":0},
@@ -390,7 +390,7 @@ class Merge_algorithm():
 				self.env.pvals["first_bin_fraction"])
 			return [None, None, None]
 		bchar0_part = self.get_bchar0_part(address)
-		top_matches = self.env.cmap.bin2char(bchar0_part, match_bits=len(bchar0_part))
+		top_matches = self.env.cmap.bin2char(bchar0_part, nret=6, match_bits=len(bchar0_part))
 		char = top_matches[0][0]
 		if top_matches[0][1] > int(self.env.pvals["char_match_fraction"] * len(bchar0_part)):
 			# found stop char, or hamming distance to top match is over threshold
@@ -1253,6 +1253,8 @@ def converge(env, address, pb_len, shuf):
 		else:
 			# version 2
 			best_address = env.ma.ku_shuffle(best_address, shuf_seed, inverse=True)
+	found_sequence = env.ma.extract_sequence_prefix(best_address)
+	print("Found chars in initial address = %s" % found_sequence)
 	return [best_address, f_non_zero, best_found_value]
 
 
@@ -1293,6 +1295,7 @@ def recall(prefix, env, reverse=False):
 		xr_len = env.ma.pvals["xr_len"]
 		prev_address = None
 		xr_thresh = int(env.pvals["char_match_fraction"] * xr_len)
+		rev_thresh = int(env.pvals["char_match_fraction"] * item_len)
 	shuf = ma == "wx2" and env.pvals["seeded_shuffle"] > 0
 	rfix = ma == "wx2" and env.pvals["recall_fix"] == 1
 	debug = env.pvals["debug"] == 1
@@ -1337,15 +1340,18 @@ def recall(prefix, env, reverse=False):
 			address_xor_part = address[wh_len:]
 			xor_hamming = hamming(recalled_xor_part,address_xor_part)
 			msg.append("xorh=%s" % xor_hamming)
-			if rfix and prev_address is not None and xor_hamming > xr_thresh and not reverse:
-				# not implemented for reverse
-				# hamming distance is greater than threshold, backtrack and try alternate characters
-				alt_address, alt_value, alt_char, alt_msg = try_alternate(env, prev_address, found[-1][1:-1], shuf, reverse, xr_thresh)
-				if alt_address is not None:
-					address = alt_address
-					value = alt_value
-					word2 = word2[0:-1] + alt_char
-				msg.append(">xr_thresh(%s): %s" % (xr_thresh, alt_msg))
+			if rfix:
+				if not reverse and prev_address is not None and xor_hamming > xr_thresh:
+					# hamming distance is greater than threshold, backtrack and try alternate characters
+					alt_address, alt_value, alt_char, alt_msg = try_alternate(env, prev_address, found[-1][1:-1], shuf, reverse, xr_thresh)
+					if alt_address is not None:
+						address = alt_address
+						value = alt_value
+						word2 = word2[0:-1] + alt_char
+					msg.append(">xr_thresh(%s): %s" % (xr_thresh, alt_msg))
+				# elif reverse and hamming(address[env.ma.pvals["last_char_position"]:wh_len],
+				# 	value[env.ma.pvals["last_char_position"]:wh_len]) > rev_thresh:
+				# 	msg.append(">rev_thres(%s) - fix not yet implemented" % rev_thresh)
 		new_address, found_char, top_matches = env.ma.prev(address, value) if reverse else env.ma.next(address, value)
 		found.append(top_matches)
 		if reverse:
