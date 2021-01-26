@@ -23,7 +23,7 @@ class Env:
 	 	{ "name":"activation_count", "kw":{"help":"Number memory rows to activate for each address","type":int},
 	 	  "flag":"a", "required_init":"m", "default":20},
 	 	{ "name":"char_match_fraction", "kw": {"help":"Fraction of word_length to form hamming distance threshold for"
-			" matching character to item memory","type":float},"flag":"cmf", "required_init":"", "default":0.25},
+			" matching character to item memory","type":float},"flag":"cmf", "required_init":"", "default":0.3},
 		{ "name":"merge_algorithm", "kw":{"help":"Algorithm used combine item and history when forming new address. "
 		    "wx - Weighted and/or XOR, wx2 - save xor with data, fl - First/last bits, hh - concate every other bit",
 		    "choices":["wx", "wx2", "fl", "hh", "hh2"]},
@@ -273,7 +273,7 @@ def make_permutation_map(length):
 	# np.random.RandomState(seed=42).permutation(b) does not always include all the elements in
 	# the permutation
 	# the routine here works by having shifts go through order of indexes that are random
-	shuffled_indices = np.arange(length, dtype=int32)
+	shuffled_indices = np.arange(length, dtype=np.int32)
 	np.random.shuffle(shuffled_indices)
 	return make_index_map(shuffled_indices)
 
@@ -398,7 +398,7 @@ class Merge_algorithm():
 		else:
 			new_address = self.make_reverse_address(address, value, char, top_matches)
 			if new_address is None:
-				char = self.extract_sequence_prefix(address) # + char  # don't include char because it's in the prefix
+				char = "[" + self.extract_sequence_prefix(address) + "]" # + char  # don't include char because it's in the prefix
 		return [new_address, char, top_matches]
 
 	# following default functions may be overridden in subclassses
@@ -744,7 +744,20 @@ class Ma_wx2(Ma_wx):
 				print("bin %s, item=%s, top_matches=%s, char=%s" % (i, bina2str(address[i*item_len:(i+1)*item_len]),
 					top_matches, char))
 			found = char + found
-		return "[" + found + "]"
+		return found
+
+	def make_cleaned_codes(self, chars):
+		# return array containing codes that are in chars.  This is to update codes read from memory.
+		assert "?" not in chars
+		item_len = self.pvals["item_len"]
+		cleaned_codes = np.full(item_len * len(chars), 0, dtype=np.int8)
+		for i in range(len(chars)):
+			char = chars[i]
+			bchar = self.env.cmap.char2bin(char)
+			cleaned_codes[i*item_len:(i+1)*item_len] = bchar[0:item_len]
+		return cleaned_codes
+
+
 
 	def make_shuffle_seed(self, address):
 		# seed for shuffle made from first min_key_length bins
@@ -1172,7 +1185,173 @@ def hamming(b1, b2):
 	ndiff = np.count_nonzero(b1!=b2)
 	return ndiff
 
+# def converge_from_fixed_seed(env, address, fixed_address, change_mask, max_steps):
+# 	hconverge=[]
+# 	prev_address = address
+# 	best_hdiff = word_length
+# 	while True:
+# 		found_value = env.sdm.read(address)
+# 		address = np.bitwise_or(fixed_address, np.bitwise_and(found_value, chng_mask))
+# 		# address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+# 		hdiff = hamming(prev_address, address)
+# 		if hdiff < best_hdiff:
+# 			best_address = address
+# 			best_found_value = found_value
+# 		hconverge.append(hdiff)
+# 		f_non_zero = np.count_nonzero(found_value) / len(found_value)
+# 		if hdiff == 0:
+# 			print("Seed %s,iterative converged in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count,
+# 				len(hconverge), f_non_zero, hconverge))
+# 			break
+# 		if len(hconverge) > max_steps:
+# 			print("Seed %s, did not converge in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count, len(hconverge),
+# 				f_non_zero, hconverge))
+# 			if seed_count >= max_seeds:
+# 				print("Converge failed after %s seeds" % seed_count)
+# 				break
+# 			seed_count += 1
+# 			hconverge=[]
+# 			# make a new seed for next convergence attempt
+# 			seed = np.bitwise_xor(np.roll(seed, 1), seed)
+# 			# address =  np.concatenate((address[0:pb_len], seed[pb_len:]))
+# 			address = np.bitwise_or(fixed_address, np.bitwise_and(seed, chng_mask))
+# 		prev_address = address
+
+
 def converge(env, address, pb_len, shuf):
+	# converge address by reapeat reading bits after pb_len match bits
+	# if shuf is True, shuffle wh_part of address for convergence, then unshuffle
+	word_length = env.pvals["word_length"]
+	assert len(address) == word_length
+	wh_len = env.ma.pvals["wh_len"]
+	item_len = env.ma.pvals["item_len"]
+	hconverge=[]
+	seed_count = 1
+	max_steps, max_seeds = map( int, env.pvals["converge_count"].split(',') )
+	seed = address
+	best_hdiff = word_length
+	if shuf:
+		# make mask to indicate which bits are known, which are not
+		# also shuffle wh part of address
+		if env.pvals["seeded_shuffle"] == 1:
+			# version 1 of seeded shuffle (I think does not work correctly)
+			shuf_seed = env.ma.make_shuffle_seed(address)
+			wh_len = env.ma.pvals["wh_len"]
+			xr_len = env.ma.pvals["xr_len"]
+			wh_mask = np.full(wh_len, 0, dtype=np.int8)
+			wh_mask[0:pb_len] = 1
+			wh_mask = seeded_shuffle(wh_mask, shuf_seed)
+			xr_mask = np.full(xr_len, 0, dtype=np.int8)
+			keep_mask = np.concatenate((wh_mask, xr_mask))
+			wh_part = seeded_shuffle(address[0:wh_len], shuf_seed)
+			xr_part = address[wh_len:]
+			address = np.concatenate((wh_part, xr_part))
+		else:
+			# version 2 - new and improved
+			shuf_seed = env.ma.make_shuffle_seed(address)
+			wh_len = env.ma.pvals["wh_len"]
+			xr_len = env.ma.pvals["xr_len"]
+			wh_mask = np.full(wh_len, 0, dtype=np.int8)
+			wh_mask[0:pb_len] = 1
+			xr_mask = np.full(xr_len, 0, dtype=np.int8)
+			keep_mask = env.ma.ku_shuffle(np.concatenate((wh_mask, xr_mask)), shuf_seed)
+			address = env.ma.ku_shuffle(address, shuf_seed)
+		assert len(keep_mask) == word_length
+		assert len(address) == word_length
+	else:
+		# no shuffle, known_mask is just covering first pb_len bits
+		keep_mask = np.full(word_length, 0, dtype=np.int8)
+		keep_mask[0:pb_len] = 1
+	chng_mask = 1 - keep_mask
+	fixed_address = np.bitwise_and(address, keep_mask)
+	prev_address = address
+	froze_wh = True if pb_len == wh_len else False
+	pre_clear_xor = None
+	while True:
+		found_value = env.sdm.read(address)
+		address = np.bitwise_or(fixed_address, np.bitwise_and(found_value, chng_mask))
+		# address = np.concatenate((address[0:pb_len], found_value[pb_len:]))
+		hdiff = hamming(prev_address, address)
+		if hdiff < best_hdiff:
+			if pre_clear_xor is not None:
+				print("updated best_address after froze_wh")
+			best_address = address
+			best_found_value = found_value
+			best_hdiff = hdiff
+		hconverge.append(hdiff)
+		f_non_zero = np.count_nonzero(found_value) / len(found_value)
+		if hdiff == 0:
+			print("Seed %s,iterative converged in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count,
+				len(hconverge), f_non_zero, hconverge))
+			if not froze_wh:
+				# now replace items beyond pb_len (read from value) with their cleaned up value (from item memory)
+				address = env.ma.ku_shuffle(best_address, shuf_seed, inverse=True)
+				found_sequence = env.ma.extract_sequence_prefix(address)
+				found_sequence = found_sequence[::-1]  # reverse order
+				if "?" in found_sequence:
+					print("Unable to find all chars in sequence, aborting cleaning codes: %s" % found_sequence)
+					break
+				prefix_len = int(pb_len / item_len)
+				cleaned_codes = env.ma.make_cleaned_codes(found_sequence[prefix_len:])
+				assert len(cleaned_codes) == wh_len - pb_len, ("len(cleaned_codes):%s != wh_len (%s) - pb_len(%s)"
+					" prefix_len=%s, item_len=%s, found_sequence='%s'" % (
+					len(cleaned_codes), wh_len, pb_len, prefix_len, item_len, found_sequence))
+				hcc = hamming(address[pb_len:wh_len], cleaned_codes)
+				if hcc == 0:
+					print("No change needed after finding cleaned_codes")
+					break
+				else:
+					print("cleaned codes changes found.  Sequence='%s' hamming distance=%s, continuing convege" % (
+						found_sequence, hcc))
+					hconverge = [ hcc ]
+					assert len(cleaned_codes) == wh_len - pb_len
+					address[pb_len:wh_len] = cleaned_codes
+					address = env.ma.ku_shuffle(address, shuf_seed)
+					hcheck = hamming(address, best_address)
+					print("updating address, hcheck=%s" % hcheck)
+					keep_mask = np.full(word_length, 0, dtype=np.int8)
+					keep_mask[0:wh_len] = 1
+					chng_mask = 1 - keep_mask
+					fixed_address = np.bitwise_and(address, keep_mask)
+					froze_wh = True
+					best_hdiff = hcc
+					pre_clear_xor = address[wh_len:]
+			else:
+				if pre_clear_xor is not None:
+					adr_chng = hamming(pre_clear_xor, best_address[wh_len:])
+					print("Done converge after fixing wh.  Change in address is: %s" % adr_chng)
+				break
+		if len(hconverge) > max_steps:
+			print("Seed %s, did not converge in %s steps, f_non_zero=%s, hdiff=%s" % (seed_count, len(hconverge),
+				f_non_zero, hconverge))
+			if pre_clear_xor is not None:
+				adr_chng = hamming(pre_clear_xor, best_address[wh_len:])
+				print("Stoping converge after fixing wh.  Change in address is: %s" % adr_chng)
+				break
+			if seed_count >= max_seeds:
+				print("Converge failed after %s seeds" % seed_count)
+				break
+			seed_count += 1
+			hconverge=[]
+			# make a new seed for next convergence attempt
+			seed = np.bitwise_xor(np.roll(seed, 1), seed)
+			# address =  np.concatenate((address[0:pb_len], seed[pb_len:]))
+			address = np.bitwise_or(fixed_address, np.bitwise_and(seed, chng_mask))
+		prev_address = address
+	if shuf:
+		# need to unshuffle address before returning
+		if env.pvals["seeded_shuffle"] == 1:
+			wh_part = seeded_shuffle(best_address[0:wh_len], shuf_seed, inverse=True)
+			xr_part = best_address[wh_len:]
+			best_address = np.concatenate((wh_part, xr_part))
+		else:
+			# version 2
+			best_address = env.ma.ku_shuffle(best_address, shuf_seed, inverse=True)
+	found_sequence = env.ma.extract_sequence_prefix(best_address)
+	print("Found chars in initial address = %s" % found_sequence)
+	return [best_address, f_non_zero, best_found_value]
+
+def converge_orig(env, address, pb_len, shuf):
 	# converge address by reapeat reading bits after pb_len match bits
 	# if shuf is True, shuffle wh_part of address for convergence, then unshuffle
 	word_length = env.pvals["word_length"]
@@ -1256,7 +1435,6 @@ def converge(env, address, pb_len, shuf):
 	found_sequence = env.ma.extract_sequence_prefix(best_address)
 	print("Found chars in initial address = %s" % found_sequence)
 	return [best_address, f_non_zero, best_found_value]
-
 
 def try_alternate(env, prev_address, alt_chars, shuf, reverse, xr_thresh):
 	# try alternate characters for continuing sequence
