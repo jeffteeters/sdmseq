@@ -43,8 +43,8 @@ class Env:
 	 	{ "name":"converge_count", "kw":{"help":"Converge count for wx2; format: <int1>,<int2>; <int1> number of reads to converge "
 	 	  "for each seed addresss, <int2> number of seeds to try", "type":str}, "flag":"cvc",
 	 	  "required_init":"", "default":"30,30"},
-	 	{ "name":"seeded_shuffle", "kw":{"help":"Shuffle history part using seed (wx2 algorithm), 1-yes, 0-no, 2-new method",
-	 	  "type":int, "choices":[0, 1, 2]},"flag":"ss", "required_init":"m", "default":2},
+	 	{ "name":"seeded_shuffle", "kw":{"help":"Shuffle history part using seed (wx2 algorithm), 0-no, 2-yes (new method)",
+	 	  "type":int, "choices":[0, 2]},"flag":"ss", "required_init":"m", "default":2},
 	 	{ "name":"recall_fix", "kw":{"help":"Fix errors when recalling sequence (wx2 algorithm), 1-yes, 0-no",
 	 	  "type":int, "choices":[0, 1]},"flag":"rf", "required_init":"", "default":0},
 	 	{ "name":"min_key_length", "kw":{"help":"minimum length of key string recalling (wx2 algorithm), must be >1",
