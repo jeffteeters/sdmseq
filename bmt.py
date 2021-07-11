@@ -6,6 +6,7 @@ from random import randint
 import time
 import hashlib
 import json
+from bitarray import bitarray
 
 
 class Env:
@@ -113,6 +114,14 @@ class SDMt:
 		data_md5 = hashlib.md5(result.encode('utf-8')).hexdigest()
 		print("duration is %s s, data_md5: %s" % (duration, data_md5))
 
+def as_bit_str(ba):
+	# convert binary array to string of bits
+	bstr = "";
+	for b in ba:
+		bstr += "%s" % b
+	return bstr
+
+
 def initialize_binary_matrix(nrows, ncols, packed):
 	# create binary matrix with each row having binary random number
 	# if packed, store as binary, otherwise as bytes
@@ -120,7 +129,10 @@ def initialize_binary_matrix(nrows, ncols, packed):
 	bm = np.random.randint(2, size=(nrows, ncols), dtype=np.int8)
 	if packed:
 		# pack so 
-		bm = np.packbits(bm, axis=-1)
+		# bm = np.packbits(bm, axis=-1)
+		bm = [ bitarray(list(x.astype(bool))) for x in bm]
+
+		# 4294967295
 	# if not packed:
 	# 	bm = np.random.randint(2, size=(nrows, ncols), dtype=np.int8)
 	# else:
@@ -150,26 +162,31 @@ def find_matches(m, b, nret, packed=False, index_only = False, match_bits=None):
 	# returns sorted tuple (i, c) where i is index and c is number of non-matching bits (0 is perfect match)
 	# if index_only is True, only return the indices, not the c
 	# if match_bits is not None, it is the number of bits to match (subset), otherwise full length is used
-	assert len(m.shape) == 2, "array to match must be 2-d"
+	if not packed:
+		assert len(m.shape) == 2, "array to match must be 2-d"
 	# assert m.shape[1] == len(b), "array element size does not match size of match binary value"
-	if match_bits is None:
-		assert len(b) == m.shape[1], "match_bits is None but len(b) (%s) not equal to m.shape[1] (%s)" % (
-			len(b), m.shape[1])
-		match_bits = len(b)
-	assert match_bits <= len(b), "match_bits for find_matches too long (%s), must be less than (%s)" % (match_bits, len(b))
+	# if match_bits is None:
+	# 	assert len(b) == m.shape[1], "match_bits is None but len(b) (%s) not equal to m.shape[1] (%s)" % (
+	# 		len(b), m.shape[1])
+	# 	match_bits = len(b)
+	# assert match_bits <= len(b), "match_bits for find_matches too long (%s), must be less than (%s)" % (match_bits, len(b))
 	matches = []
 	if not packed:
 		for i in range(m.shape[0]):
 			ndiff = np.count_nonzero(m[i][0:match_bits]!=b[0:match_bits])
 			matches.append( (i, ndiff) )
 	else:
-		r = (1 << np.arange(8))[:,None]
-		for i in range(m.shape[0]):
-			# ndiff = np.count_nonzero((np.bitwise_xor(m[i],b) & r) != 0) # 10 sec
-			# ndiff = int(np.unpackbits(np.bitwise_xor(m[i],b)).sum())  # 11 sec
-			c = np.bitwise_xor(m[i],b)
-			ndiff = 23 # int(_nbits[c].sum())
+		for i in range(len(m)):
+			ndiff =(m[i]^b).count()
 			matches.append( (i, ndiff) )
+
+		# r = (1 << np.arange(8))[:,None]
+		# for i in range(m.shape[0]):
+		# 	# ndiff = np.count_nonzero((np.bitwise_xor(m[i],b) & r) != 0) # 10 sec
+		# 	# ndiff = int(np.unpackbits(np.bitwise_xor(m[i],b)).sum())  # 11 sec
+		# 	c = np.bitwise_xor(m[i],b)
+		# 	ndiff = 23 # int(_nbits[c].sum())
+		# 	matches.append( (i, ndiff) )
 	# matches.sort(key=itemgetter(1))
 	matches.sort(key = lambda y: (y[1], y[0]))
 	top_matches = matches[0:nret]
